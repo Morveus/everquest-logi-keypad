@@ -34,8 +34,10 @@ relancer — le service, lui, garde le plugin chargé.
 
 Prérequis : SDK .NET 10 (`winget install Microsoft.DotNet.SDK.10`).
 
+Depuis la racine du dépôt :
+
 ```bash
-dotnet build "C:\Users\user\Documents\Everquest Logi\app\plugin\EverQuestPlugin\EverQuestPlugin.csproj" -c Release
+dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release
 ```
 
 Le build écrit un fichier `EverQuestPlugin.link` dans le dossier des plugins du
