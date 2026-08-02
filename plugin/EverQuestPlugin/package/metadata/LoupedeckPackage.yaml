@@ -1,0 +1,17 @@
+type: plugin4
+name: EverQuest
+displayName: EverQuest Spells
+description: Touches de sorts EverQuest avec icones synchronisees depuis le jeu (ALT+1..9)
+pluginFileName: EverQuestPlugin.dll
+version: 1.0
+author: Morveus
+copyright: 2026
+
+minimumLoupedeckVersion: 6.0
+
+pluginFolderWin: bin
+pluginFolderMac: bin
+
+supportedDevices:
+    - LoupedeckCtFamily
+    - LoupedeckExtendedFamily

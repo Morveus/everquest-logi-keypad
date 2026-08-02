@@ -1,0 +1,12 @@
+# Sorties générées par l'extracteur (recréées à chaque exécution)
+icons/
+barfit.json
+debug-capture.png
+
+# Build .NET du plugin
+bin/
+obj/
+
+# Divers
+*.bak
+*.user
