@@ -44,6 +44,12 @@ Le build écrit un fichier `EverQuestPlugin.link` dans le dossier des plugins du
 service et déclenche `loupedeck:plugin/EverQuest/reload` : le plugin est rechargé
 à chaud, sans redémarrer Options+.
 
+> **Attention** : ce fichier `.link` contient le chemin absolu du dossier compilé.
+> Compiler une *copie* du dépôt (clone de test, autre dossier) fait donc pointer le
+> service vers cette copie, et le plugin cesse de suivre l'installation d'origine.
+> Pour revenir en arrière, recompiler depuis le bon dossier, ou corriger le contenu de
+> `%LOCALAPPDATA%\Logi\LogiPluginService\Plugins\EverQuestPlugin.link`.
+
 Journal : `%LOCALAPPDATA%\Logi\LogiPluginService\Logs\plugin_logs\EverQuest.log`
 
 ## Détails d'implémentation (pièges rencontrés)
