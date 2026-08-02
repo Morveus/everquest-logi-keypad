@@ -19,7 +19,7 @@ déplacée.
 
 Un cycle de veille doit être discret et ne jamais dégrader ce qui est affiché :
 
-- il n'utilise que la grille en cache — pas de relocalisation (~2 s au lieu de ~25 s) ;
+- il n'utilise que la grille en cache — pas de relocalisation ;
 - si le jeu est fermé, minimisé, ou si la lecture est douteuse, il sort avec le
   code 2 sans rien toucher ;
 - il n'écrit un PNG que si les octets diffèrent réellement, pour ne pas réveiller
@@ -27,6 +27,35 @@ Un cycle de veille doit être discret et ne jamais dégrader ce qui est affiché
 
 Codes de sortie : `0` = exécuté, `1` = erreur, `2` = rien à faire (le plugin
 l'interprète comme « cycle silencieux » et ne signale rien).
+
+### La passe de veille : « est-ce toujours la même icône ? »
+
+Reconnaître une gemme, c'est demander *« laquelle des 2 262 icônes est-ce ? »*. En
+veille, la vraie question est bien moins chère : *« est-ce encore celle d'avant ? »*.
+Le script compare donc chaque gemme au PNG déjà sauvegardé — **9 comparaisons au lieu
+de 9 × 2 262** — et s'arrête là si tout concorde.
+
+Coûts mesurés (processus séparé, comme le lance le plugin) :
+
+| | Temps écoulé | Temps processeur |
+|---|---|---|
+| Passe de veille (rien n'a changé) | 0,52 s | 0,42 s |
+| Reconnaissance complète | 2,60 s | 2,40 s |
+
+Deux garde-fous rendent une boucle à 5 s viable :
+
+- **Une gemme illisible ne compte pas.** Un emplacement vide ou un sort en cours de
+  mémorisation donne une zone uniforme, sans information : elle est ignorée au lieu
+  d'être lue comme « tout a changé ». Si aucune gemme n'est lisible, le cycle passe.
+- **Les reconnaissances complètes sont bridées** (`FullCooldown`, 25 s par défaut).
+  Une gemme en cours de recast fait chuter son score exactement comme le ferait un
+  changement de sort ; sans ce frein, un combat animé relancerait la reconnaissance
+  complète à chaque cycle. En pratique : en situation calme la boucle ne coûte que des
+  passes de veille, et même en combat elle reste bornée.
+
+La bibliothèque C# est aussi compilée une seule fois vers `tools\EqIconLib.dll` et
+rechargée ensuite (0,02 s au lieu de 0,26 s), le DLL étant reconstruit dès que la
+source change.
 
 Prérequis : le jeu tourne, fenêtre non minimisée (pas besoin qu'elle ait le focus).
 Aucune interaction avec le jeu : capture passive (`PrintWindow`) + lecture des
@@ -41,6 +70,7 @@ fichiers du jeu uniquement.
 | `contact.png` | Planche de contrôle : gemme capturée vs icône sauvée (runs complets seulement) |
 | `manifest.json` | Par gemme : planche source, index, score de confiance |
 | `state.json` | Mémoire du choix par gemme, base de la règle « collante » ci-dessous |
+| `watch.json` | Horodatage de la dernière reconnaissance complète (bridage de la veille) |
 
 Le premier réflexe de diagnostic est d'ouvrir `contact.png` : la colonne de gauche est
 ce qui a été capturé à l'écran, celle de droite l'icône retenue. Si les deux colonnes

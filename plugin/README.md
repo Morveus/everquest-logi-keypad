@@ -8,10 +8,11 @@ Plugin C# pour Logi Plugin Service / MX Creative Console. Il expose :
   ALT+(, ALT+-, ALT+è, ALT+_, ALT+ç).
 - **1 action « Mettre à jour les icônes »** : lance `update-spell-icons.ps1` (run
   complet) en arrière-plan et rafraîchit les 9 touches quand les PNG changent.
-- **1 action « Mise à jour auto (30 s) »** : bascule le rafraîchissement de fond,
-  **actif par défaut**. Le minuteur ne lance rien si EverQuest n'est pas lancé, et
-  n'exécute jamais deux runs en parallèle. Il appelle le script en mode `-Quick` :
-  ~2 s, grille en cache uniquement, abandon silencieux si la lecture est douteuse.
+- **1 action « Mise à jour auto »** : bascule le rafraîchissement de fond, **actif par
+  défaut**, cadencé à **5 s** (`IconUpdater.DefaultIntervalSeconds`). Le minuteur ne
+  lance rien si EverQuest n'est pas lancé et n'exécute jamais deux runs en parallèle.
+  Il appelle le script en mode `-Quick`, dont la passe de veille coûte ~0,5 s et qui
+  bride lui-même ses reconnaissances complètes — voir le [README principal](../README.md).
 
 Statut : chargé, affiché et validé en jeu (affichage et frappe ALT+chiffre).
 

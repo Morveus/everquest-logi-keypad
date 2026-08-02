@@ -20,6 +20,8 @@ param(
     [int]$MaxAttempts = 3,         # captures can hit a bad moment (casting flash, overlay)
     [double]$Hysteresis = 0.05,    # how much better a challenger must be to replace the shown icon
     [double]$ChangeScore = 0.90,   # minimum confidence required to change an icon at all
+    [double]$WatchScore = 0.85,    # above this, a gem still shows the icon we saved -> skip
+    [int]$FullCooldown = 25,       # seconds between two full recognitions while polling
     # Polling mode: use the cached grid only, one attempt, no full search. A bad moment
     # simply means "skip this cycle" (exit 2) instead of burning ~12 s re-searching.
     [switch]$Quick
@@ -96,14 +98,38 @@ if (-not $GameDir -or -not (Test-EqDir $GameDir)) {
 Write-Host "Game folder: $GameDir"
 
 # --- Compile helpers -------------------------------------------------------
-$libSrc = Get-Content (Join-Path $PSScriptRoot "tools\EqIconLib.cs") -Raw
+# Compiling EqIconLib.cs costs ~0.26 s, which matters when polling every few seconds.
+# Build it once to a DLL next to the source and just load it afterwards (~0.02 s),
+# rebuilding only when the source is newer.
+$libSrcPath = Join-Path $PSScriptRoot "tools\EqIconLib.cs"
+$libDllPath = Join-Path $PSScriptRoot "tools\EqIconLib.dll"
 if (-not ("EqIcon.Matcher" -as [type])) {
-    $cpar = New-Object System.CodeDom.Compiler.CompilerParameters
-    $cpar.CompilerOptions = "/unsafe /optimize"
-    [void]$cpar.ReferencedAssemblies.Add("System.dll")
-    [void]$cpar.ReferencedAssemblies.Add("System.Core.dll")
-    [void]$cpar.ReferencedAssemblies.Add("System.Drawing.dll")
-    Add-Type -TypeDefinition $libSrc -CompilerParameters $cpar
+    $dllFresh = (Test-Path $libDllPath) -and
+                ((Get-Item $libDllPath).LastWriteTimeUtc -ge (Get-Item $libSrcPath).LastWriteTimeUtc)
+    $loaded = $false
+    if ($dllFresh) {
+        try { Add-Type -Path $libDllPath; $loaded = $true } catch { $loaded = $false }
+    }
+    if (-not $loaded) {
+        $cpar = New-Object System.CodeDom.Compiler.CompilerParameters
+        $cpar.CompilerOptions = "/unsafe /optimize"
+        [void]$cpar.ReferencedAssemblies.Add("System.dll")
+        [void]$cpar.ReferencedAssemblies.Add("System.Core.dll")
+        [void]$cpar.ReferencedAssemblies.Add("System.Drawing.dll")
+        # Two runs can overlap; if writing the DLL fails, fall back to in-memory.
+        try {
+            $cpar.GenerateInMemory = $false
+            $cpar.OutputAssembly = $libDllPath
+            Add-Type -TypeDefinition (Get-Content $libSrcPath -Raw) -CompilerParameters $cpar
+        } catch {
+            $cpar2 = New-Object System.CodeDom.Compiler.CompilerParameters
+            $cpar2.CompilerOptions = "/unsafe /optimize"
+            [void]$cpar2.ReferencedAssemblies.Add("System.dll")
+            [void]$cpar2.ReferencedAssemblies.Add("System.Core.dll")
+            [void]$cpar2.ReferencedAssemblies.Add("System.Drawing.dll")
+            Add-Type -TypeDefinition (Get-Content $libSrcPath -Raw) -CompilerParameters $cpar2
+        }
+    }
 }
 if (-not ("Win32Cap" -as [type])) {
     Add-Type @"
@@ -116,6 +142,106 @@ public class Win32Cap {
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
+}
+
+# --- Window capture helpers ------------------------------------------------
+function Get-EqWindowHandle {
+    $p = Get-Process eqgame -ErrorAction SilentlyContinue |
+         Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+    if (-not $p) { return [IntPtr]::Zero }
+    return $p.MainWindowHandle
+}
+
+function Get-EqCapture($hwnd) {
+    $rect = New-Object Win32Cap+RECT
+    [void][Win32Cap]::GetWindowRect($hwnd, [ref]$rect)
+    $bw = $rect.Right - $rect.Left; $bh = $rect.Bottom - $rect.Top
+    $bmp = New-Object System.Drawing.Bitmap $bw, $bh
+    $gr = [System.Drawing.Graphics]::FromImage($bmp)
+    $hdc = $gr.GetHdc()
+    [void][Win32Cap]::PrintWindow($hwnd, $hdc, 2)  # PW_RENDERFULLCONTENT
+    $gr.ReleaseHdc($hdc)
+    $gr.Dispose()
+    return $bmp
+}
+
+# --- Watch pass: has anything actually changed? ----------------------------
+# Recognising a gem means asking "which of the 2262 icons is this?". While polling the
+# real question is far cheaper: "is it still the same one as last time?" - 9 comparisons
+# against the PNGs we already saved instead of 9 x 2262. Only when the answer is no do
+# we pay for the full recognition below.
+if ($Quick) {
+    $cacheEarly = Join-Path $PSScriptRoot "barfit.json"
+    $ready = Test-Path $cacheEarly
+    for ($n = 1; $n -le 9 -and $ready; $n++) {
+        if (-not (Test-Path (Join-Path $OutDir "spell_$n.png"))) { $ready = $false }
+    }
+
+    if ($ready) {
+        $hw = Get-EqWindowHandle
+        if ($hw -eq [IntPtr]::Zero) { Write-Host "EverQuest not running - skipping."; exit 2 }
+        if ([Win32Cap]::IsIconic($hw)) { Write-Host "Window minimized - skipping."; exit 2 }
+
+        try {
+            $grid = Get-Content $cacheEarly -Raw | ConvertFrom-Json
+            $capW = Get-EqCapture $hw
+            $scrW = [EqIcon.FloatImg]::FromBitmap($capW)
+            $capW.Dispose()
+
+            $worst = 1.0
+            $conclusive = 0
+            for ($n = 1; $n -le 9; $n++) {
+                # Load the saved icon without locking the file (the plugin may read it).
+                $bytes = [System.IO.File]::ReadAllBytes((Join-Path $OutDir "spell_$n.png"))
+                $ms = New-Object System.IO.MemoryStream (,$bytes)
+                $png = [System.Drawing.Image]::FromStream($ms)
+                $tplImg = [EqIcon.FloatImg]::FromBitmap($png)
+                $png.Dispose(); $ms.Dispose()
+                # Same compositing as the library, so the two are directly comparable.
+                $tplImg.CompositeOver(107, 107, 107)
+                $tpl = $tplImg.Patch(0, 0, $tplImg.W, $tplImg.H, 24)
+                if (-not [EqIcon.Matcher]::Normalize($tpl)) { continue }
+
+                $iy = $grid.Y0 + ($n - 1) * $grid.Stride
+                $patch = $scrW.Patch($grid.X, $iy, $grid.Size, $grid.Size, 24)
+                # A flat patch carries no information (empty gem slot, spell being
+                # scribed): it must not be read as "everything changed".
+                if (-not [EqIcon.Matcher]::Normalize($patch)) { continue }
+
+                $conclusive++
+                $s = [EqIcon.Matcher]::Dot($patch, $tpl)
+                if ($s -lt $worst) { $worst = $s }
+            }
+
+            if ($conclusive -eq 0) {
+                Write-Host "No readable gem - skipping."
+                exit 2
+            }
+            if ($worst -ge $WatchScore) {
+                Write-Host ("Unchanged ({0} gems read, worst {1}) - skipping." -f $conclusive, [Math]::Round($worst, 3))
+                exit 2
+            }
+
+            # Below the threshold means "maybe changed" - but a gem being recast also
+            # drops here, and that happens constantly in combat. Rate-limit the expensive
+            # confirmation so a busy fight cannot make us run it every cycle.
+            $watchPath = Join-Path $OutDir "watch.json"
+            if (Test-Path $watchPath) {
+                try {
+                    $wj = Get-Content $watchPath -Raw | ConvertFrom-Json
+                    $age = ([DateTime]::UtcNow - [DateTime]::Parse($wj.lastFullUtc).ToUniversalTime()).TotalSeconds
+                    if ($age -lt $FullCooldown) {
+                        Write-Host ("Uncertain (worst gem {0}) but checked {1}s ago - skipping." -f `
+                            [Math]::Round($worst, 3), [int]$age)
+                        exit 2
+                    }
+                } catch { }
+            }
+            Write-Host ("Change suspected (worst gem {0}) - running full recognition." -f [Math]::Round($worst, 3))
+        } catch {
+            Write-Host "Watch pass failed ($($_.Exception.Message)) - running full recognition."
+        }
+    }
 }
 
 # --- Read the character's UI settings (active skin, spell bar X) -----------
@@ -488,5 +614,9 @@ $contact.Dispose()
 
 # Remember what is on screen so the next run can stay on it (see the stickiness rule).
 [PSCustomObject]@{ gems = $manifest } | ConvertTo-Json -Depth 4 | Set-Content $statePath -Encoding utf8
+
+# Timestamp of this full recognition, used to rate-limit the watch pass.
+[PSCustomObject]@{ lastFullUtc = [DateTime]::UtcNow.ToString("o") } |
+    ConvertTo-Json | Set-Content (Join-Path $OutDir "watch.json") -Encoding utf8
 
 Write-Host "Done. $($script:Changed) file(s) updated in $OutDir"

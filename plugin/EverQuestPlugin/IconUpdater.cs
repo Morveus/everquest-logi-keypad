@@ -8,7 +8,10 @@ namespace Loupedeck.EverQuestPlugin
     // on a timer (quick run: cached grid only, skips silently on a bad moment).
     internal static class IconUpdater
     {
-        public const Int32 DefaultIntervalSeconds = 30;
+        // The script's watch pass makes a cycle cheap (~0.5 s), so polling can be brisk.
+        // It rate-limits its own expensive re-recognition, so a short interval here does
+        // not translate into constant heavy work.
+        public const Int32 DefaultIntervalSeconds = 5;
 
         private static readonly Object Sync = new Object();
         private static Boolean _running;

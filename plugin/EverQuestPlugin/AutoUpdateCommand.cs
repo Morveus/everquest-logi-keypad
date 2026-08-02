@@ -7,7 +7,7 @@ namespace Loupedeck.EverQuestPlugin
     public class AutoUpdateCommand : PluginDynamicCommand
     {
         public AutoUpdateCommand()
-            : base(displayName: "Mise à jour auto (30 s)", description: "Active ou coupe le rafraîchissement automatique des icônes", groupName: "Sorts EverQuest")
+            : base(displayName: "Mise à jour auto", description: "Active ou coupe le rafraîchissement automatique des icônes", groupName: "Sorts EverQuest")
         {
         }
 
