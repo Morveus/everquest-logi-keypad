@@ -43,7 +43,17 @@ namespace Loupedeck.EverQuestPlugin
             return true;
         }
 
-        private void OnIconsChanged(Object sender, EventArgs e) => this.ActionImageChanged();
+        // This command has parameters ("1".."9"), so the service needs to be told which
+        // variation changed. The parameterless overload is for actions without
+        // parameters: calling it here left every key on its default rendering until the
+        // user pressed it, which is what forced a redraw.
+        private void OnIconsChanged(Object sender, EventArgs e)
+        {
+            for (var i = 1; i <= SpellBarReader.GemCount; i++)
+            {
+                this.ActionImageChanged(i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
 
         protected override void RunCommand(String actionParameter)
         {
