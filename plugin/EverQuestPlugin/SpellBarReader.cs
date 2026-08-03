@@ -59,6 +59,7 @@ namespace Loupedeck.EverQuestPlugin
 
         private readonly Plugin _plugin;
         private readonly Object _sync = new Object();
+        private readonly Object _pngLock = new Object();   // guards GemState.Png only
         private readonly GemState[] _gems = new GemState[GemCount];
 
         private List<LibIcon> _lib;
@@ -85,15 +86,19 @@ namespace Loupedeck.EverQuestPlugin
             this.LoadState();
         }
 
-        // Returns a fresh BitmapImage each call. Handing out a shared instance and
-        // disposing it on the next update raced with the SDK drawing the key: the draw
-        // threw and Options+ fell back to showing the action's name as text.
+        // Returns a fresh BitmapImage each call; the caller owns and disposes it.
+        // Handing out a shared instance and disposing it on the next update raced with
+        // the SDK drawing the key: the draw threw and Options+ showed the action name.
+        //
+        // Uses its own tiny lock, NOT _sync: Update() holds _sync for the whole read,
+        // which can run a minute when the bar has to be located from scratch, and key
+        // rendering must never queue behind that.
         public BitmapImage GetImage(Int32 gem)
         {
+            if (gem < 1 || gem > GemCount) { return null; }
             Byte[] png;
-            lock (this._sync)
+            lock (this._pngLock)
             {
-                if (gem < 1 || gem > GemCount) { return null; }
                 png = this._gems[gem - 1].Png;
             }
             if (png == null) { return null; }
@@ -148,6 +153,22 @@ namespace Loupedeck.EverQuestPlugin
                         {
                             this.RefineGrid(strip);
                             scores = this.GemScores(strip, this._grid);
+                        }
+
+                        // Every gem unreadable while we do know what they should look like
+                        // means the capture itself is blank, not that the spells changed.
+                        // Treating that as "unchanged" would freeze stale icons forever.
+                        var readable = 0;
+                        var known = 0;
+                        for (var i = 0; i < GemCount; i++)
+                        {
+                            if (!Single.IsNaN(scores[i])) { readable++; }
+                            if (this._gems[i].Norm24 != null) { known++; }
+                        }
+                        if (readable == 0 && known > 0)
+                        {
+                            this.LastStatus = "capture illisible";
+                            return ReadOutcome.Unreadable;
                         }
 
                         var suspicious = new List<Int32>();
@@ -344,7 +365,7 @@ namespace Loupedeck.EverQuestPlugin
                     if (bmp40 == null) { return false; }
                     var png = EncodeScaledPng(bmp40, 128);
                     var st = this._gems[gemIndex];
-                    st.Png = png;
+                    lock (this._pngLock) { st.Png = png; }
                     st.Sheet = icon.Sheet;
                     st.Index = icon.Index;
                     st.Norm24 = icon.Norm24;

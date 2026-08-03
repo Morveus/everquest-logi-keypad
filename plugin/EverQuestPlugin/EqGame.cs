@@ -25,13 +25,19 @@ namespace Loupedeck.EverQuestPlugin
 
         public static IntPtr FindWindow()
         {
+            var found = IntPtr.Zero;
             try
             {
+                // Process objects hold OS handles; polling every few seconds without
+                // disposing them leaks thousands of handles a day.
                 foreach (var p in Process.GetProcessesByName("eqgame"))
                 {
-                    if (p.MainWindowHandle != IntPtr.Zero)
+                    using (p)
                     {
-                        return p.MainWindowHandle;
+                        if (found == IntPtr.Zero && p.MainWindowHandle != IntPtr.Zero)
+                        {
+                            found = p.MainWindowHandle;
+                        }
                     }
                 }
             }
@@ -39,7 +45,7 @@ namespace Loupedeck.EverQuestPlugin
             {
                 // Falls through to "not running".
             }
-            return IntPtr.Zero;
+            return found;
         }
 
         public static Boolean IsMinimized(IntPtr hwnd) => IsIconic(hwnd);
@@ -59,17 +65,26 @@ namespace Loupedeck.EverQuestPlugin
             }
 
             var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+            var ok = false;
             using (var g = Graphics.FromImage(bmp))
             {
                 var hdc = g.GetHdc();
                 try
                 {
-                    PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT);
+                    ok = PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT);
                 }
                 finally
                 {
                     g.ReleaseHdc(hdc);
                 }
+            }
+            // A failed PrintWindow leaves an all-black bitmap. Reporting that as a
+            // successful capture makes "the game did not render" indistinguishable from
+            // "nothing changed", and the plugin would sit on stale icons forever.
+            if (!ok)
+            {
+                bmp.Dispose();
+                return null;
             }
             return bmp;
         }

@@ -7,14 +7,14 @@ namespace Loupedeck.EverQuestPlugin
     // read live from the game window.
     public class SpellCommand : PluginDynamicCommand
     {
-        // Unshifted characters of the AZERTY digit row, for labels only.
-        private static readonly String[] AzertyDigitChars = { "&", "é", "\"", "'", "(", "-", "è", "_", "ç" };
-
         public SpellCommand() : base()
         {
             for (var i = 1; i <= SpellBarReader.GemCount; i++)
             {
-                this.AddParameter($"{i}", $"Sort {i} (ALT+{AzertyDigitChars[i - 1]})", "Sorts EverQuest");
+                // Layout-neutral label on purpose: the keystroke is sent by physical key
+                // position, so this is ALT+& on AZERTY and ALT+1 on QWERTY. Naming the
+                // AZERTY character here would read as a bug on any other layout.
+                this.AddParameter($"{i}", $"Sort {i} (ALT+{i})", "Sorts EverQuest");
             }
         }
 
@@ -50,15 +50,19 @@ namespace Loupedeck.EverQuestPlugin
         {
             if (Int32.TryParse(actionParameter, out var gem))
             {
-                var img = EverQuestPlugin.Reader?.GetImage(gem);
-                if (img != null)
+                // GetImage hands over ownership: dispose it or every repaint leaks a
+                // decoded 128x128 image until finalization.
+                using (var img = EverQuestPlugin.Reader?.GetImage(gem))
                 {
-                    using (var builder = new BitmapBuilder(imageSize))
+                    if (img != null)
                     {
-                        builder.Clear(BitmapColor.Black);
-                        // Edge to edge: the icon is the label.
-                        builder.DrawImage(img, 0, 0, builder.Width, builder.Height);
-                        return builder.ToImage();
+                        using (var builder = new BitmapBuilder(imageSize))
+                        {
+                            builder.Clear(BitmapColor.Black);
+                            // Edge to edge: the icon is the label.
+                            builder.DrawImage(img, 0, 0, builder.Width, builder.Height);
+                            return builder.ToImage();
+                        }
                     }
                 }
             }

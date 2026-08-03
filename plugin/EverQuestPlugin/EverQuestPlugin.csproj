@@ -12,13 +12,24 @@
     <GenerateDependencyFile>false</GenerateDependencyFile>
     <DebugType>none</DebugType>
 
-    <PluginApiDir>C:\Program Files\Logi\LogiPluginService\</PluginApiDir>
+    <!-- Where Logi Plugin Service is installed. Probed rather than assumed, so the
+         project builds on a machine that installed Options+ elsewhere. Override on the
+         command line with -p:PluginApiDir=... if it lives somewhere else again. -->
+    <PluginApiDir Condition="'$(PluginApiDir)' == '' And Exists('$(ProgramFiles)\Logi\LogiPluginService\PluginApi.dll')">$(ProgramFiles)\Logi\LogiPluginService\</PluginApiDir>
+    <PluginApiDir Condition="'$(PluginApiDir)' == '' And Exists('$(ProgramW6432)\Logi\LogiPluginService\PluginApi.dll')">$(ProgramW6432)\Logi\LogiPluginService\</PluginApiDir>
+    <PluginApiDir Condition="'$(PluginApiDir)' == '' And Exists('$(ProgramFiles(x86))\Logi\LogiPluginService\PluginApi.dll')">$(ProgramFiles(x86))\Logi\LogiPluginService\</PluginApiDir>
+    <PluginApiDir Condition="'$(PluginApiDir)' == '' And Exists('$(LocalAppData)\Programs\Logi\LogiPluginService\PluginApi.dll')">$(LocalAppData)\Programs\Logi\LogiPluginService\</PluginApiDir>
     <PluginDir>$(LocalAppData)\Logi\LogiPluginService\Plugins\</PluginDir>
 
     <BaseOutputPath>$(MSBuildProjectDirectory)\bin\</BaseOutputPath>
     <BaseIntermediateOutputPath>$(MSBuildProjectDirectory)\obj\</BaseIntermediateOutputPath>
     <OutputPath>$(BaseOutputPath)$(Configuration)\bin\</OutputPath>
   </PropertyGroup>
+
+  <Target Name="CheckPluginApi" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(PluginApiDir)' == ''"
+           Text="Logi Plugin Service introuvable. Installez Logi Options+, ou indiquez le dossier : dotnet build -p:PluginApiDir=&quot;D:\chemin\LogiPluginService\&quot;" />
+  </Target>
 
   <ItemGroup>
     <!-- Both assemblies ship with Logi Plugin Service, so they are guaranteed present at
