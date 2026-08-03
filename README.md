@@ -1,108 +1,167 @@
-# EverQuest → Logi MX Creative Keypad
+# EverQuest Spells — Logi MX Creative Console plugin
 
-Plugin Logitech qui affiche sur les 9 touches du MX Creative Keypad les icônes des
-9 premières gemmes de sorts d'EverQuest, lues **en direct dans la fenêtre du jeu**, et
-qui envoie le raccourci de lancement du sort correspondant.
+Your nine spell gems, live on your keypad.
 
-Tout est dans un seul DLL : capture de la fenêtre, localisation de la barre,
-reconnaissance des icônes, affichage et frappe clavier. Aucun script, aucun processus
-externe, rien à installer à côté.
+This plugin watches the EverQuest window, recognises which spells you have memorised,
+and paints the matching icons on the first nine keys of a Logitech MX Creative Console.
+Pressing a key casts the spell. Memorise a different spell and the key follows within
+five seconds — no configuration, no re-mapping, nothing to maintain.
 
-## Installation
+It is a single DLL. It does not modify the game, inject anything into it, or read its
+memory: it takes a passive screenshot of the window and compares what it sees against
+the game's own icon files.
 
-Prérequis : Logi Options+ (avec Logi Plugin Service) et le SDK .NET 10
-(`winget install Microsoft.DotNet.SDK.10`) pour compiler.
+---
+
+## Why
+
+Mapping nine spell icons by hand is tedious, and you have to redo it every time you
+change your spell set. This automates exactly that, and nothing else.
+
+## Requirements
+
+- Windows
+- [Logi Options+](https://www.logitech.com/software/logi-options-plus.html) with Logi Plugin Service
+- A Logitech MX Creative Console (or a Loupedeck CT / Live)
+- EverQuest, windowed or borderless (not exclusive fullscreen)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) — to build
+
+## Install
 
 ```bash
+git clone https://github.com/Morveus/everquest-logi-keypad.git
+cd everquest-logi-keypad
 dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release
 ```
 
-Le plugin est alors chargé à chaud. Il reste à affecter les actions aux touches :
-voir le [README du plugin](plugin/README.md).
+The build registers the plugin with Logi Plugin Service and reloads it — no restart of
+Options+ needed. If Options+ is installed somewhere unusual, point the build at it:
 
-## Ce que fait le plugin
+```bash
+dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release -p:PluginApiDir="D:\Logi\LogiPluginService\"
+```
 
-| Action | Rôle |
+> The build registers the *source folder* you built from. Keep the clone where it is, or
+> rebuild after moving it.
+
+## Assign the keys
+
+In Options+, select your MX Creative Console. In the actions panel on the right, click
+**ALL ACTIONS** at the top — it is filtered to *System Actions* by default and the
+plugin will not show up until you do. Then find the **Sorts EverQuest** group and drag:
+
+| Action | What it does |
 |---|---|
-| **Sort 1 … Sort 9** | Affiche l'icône du sort et envoie ALT + la touche du chiffre |
-| **Mettre à jour les icônes** | Force une relecture complète (après avoir déplacé la barre) |
-| **Mise à jour auto** | Active/coupe le rafraîchissement de fond (actif par défaut, 5 s) |
+| **Sort 1 … Sort 9** | Shows the spell icon, sends ALT + the matching number-row key |
+| **Mettre à jour les icônes** | Forces a full re-read; also the status light (red = stuck) |
+| **Mise à jour auto** | Turns the background refresh on/off (on by default) |
 
-Les icônes se mettent à jour toutes les 5 secondes sans rien faire. Changer un sort
-mémorisé se voit sur la touche au cycle suivant.
+The keystroke is sent by *physical key position*, so it is ALT+1…ALT+9 on QWERTY and
+ALT+&, ALT+é, ALT+"… on AZERTY — whichever your EverQuest binds expect. Change your in-game
+gem binds to match, or fork and edit `KeyboardHelper.cs` if you use a different modifier.
 
-## Comment il reconnaît les icônes
+The first run has to find the spell bar from scratch, which takes about a minute. After
+that the calibration is remembered and each check costs a few tens of milliseconds.
 
-Pas d'apprentissage automatique : le problème est *fermé*, on possède déjà toutes les
-réponses possibles — ce sont les fichiers d'icônes du jeu. La question n'est donc pas
-« qu'est-ce que cette image ? » mais « laquelle de ces 2 262 images connues est-ce ? ».
+---
 
-1. **Découverte du jeu** : dossier trouvé via le processus `eqgame` en cours, sinon le
-   registre, sinon les emplacements habituels. Aucun chemin en dur.
-2. **Réglages du personnage** : le fichier `UI_<perso>_<serveur>.ini` donne le skin
-   actif et la position horizontale de la barre.
-3. **Capture** de la fenêtre par `PrintWindow` (`PW_RENDERFULLCONTENT`) : passive,
-   fonctionne avec DirectX, sans focus et sans toucher au jeu.
-4. **Choix du pack d'icônes** : le jeu contient trois jeux distincts
-   (`Textures\Alternate 1..3` ; les dossiers `uifiles` en sont des copies). Chacun est
-   noté sur la capture, le meilleur est retenu.
-5. **Reconnaissance** : chaque icône, de référence comme capturée, est rééchantillonnée
-   en 24×24 RVB (1 728 valeurs), puis centrée et normalisée. Le score est leur produit
-   scalaire, c'est-à-dire la **corrélation croisée normalisée**. Cette normalisation rend
-   la comparaison insensible à l'assombrissement de l'interface : on compare la structure
-   de l'image, pas ses valeurs absolues. Bon match : 0,96 à 0,99. Mauvais : 0,2 à 0,6.
-6. **Localisation de la barre** : par **périodicité**. Les gemmes forment une suite de
-   cellules identiques espacées d'un pas fixe ; comparer chaque ligne à celle située un
-   pas plus bas repère la barre sur toute la hauteur en ~8 ms. Le plugin remonte ensuite
-   tant qu'une gemme valide existe au-dessus, sinon toutes les icônes seraient décalées.
+## How it recognises the icons
 
-## Coût et réactivité
+No machine learning, no OCR. The problem is *closed*: every possible answer already
+exists on disk, in the game's own icon sheets. So the question is never "what is this
+image?" but "which of these 2 262 known images is it?".
 
-| | Mesuré |
+**1. Find the game.** Via the running `eqgame` process, else the uninstall registry
+entries, else the usual install locations on every fixed drive. No hardcoded path.
+
+**2. Read the character's UI file.** `UI_<character>_<server>.ini` gives the active skin
+and the spell bar's horizontal position.
+
+**3. Capture the window** with `PrintWindow(PW_RENDERFULLCONTENT)` — works on the DirectX
+surface, does not need focus, and never touches the game.
+
+**4. Pick the icon pack.** EverQuest ships three distinct icon sets under
+`Textures\Alternate 1..3` (the `uifiles` folders are byte-identical copies of two of
+them). Each is scored against the capture and the best one wins.
+
+**5. Compare.** Each icon — from the game files and from the screen — is resampled to
+24×24 RGB (1 728 values), then mean-centred and normalised. The score is their dot
+product: **normalized cross-correlation**. That normalisation is what makes it work:
+EverQuest's UI is semi-transparent, so on-screen icons are darkened and washed out, and
+NCC is blind to any uniform change in brightness or contrast. It compares *structure*.
+A correct match scores 0.96–0.99; a wrong one, 0.2–0.6.
+
+**6. Locate the bar by its geometry, not its content.** The gems form a run of identical
+cells at a fixed vertical pitch, so comparing every row to the row one pitch below finds
+the bar over the whole window height in about 8 ms.
+
+## Cost
+
+| | |
 |---|---|
-| Cycle de veille (rien n'a changé) | **0,107 s**, soit 2,1 % d'un cœur à 5 s d'intervalle |
-| Localisation complète de la barre | ~55 s (rare : au premier lancement, ou si la barre bouge) |
+| Idle check (nothing changed) | **~0.1 s**, about 2 % of one core at a 5-second interval |
+| Full bar location | ~55 s, only on first run or if you move the bar |
 
-Le cycle de veille ne repose pas la question complète : il compare chaque gemme au
-descripteur de l'icône **déjà affichée**, soit 9 produits scalaires. Ce n'est qu'en cas
-d'écart que la gemme concernée est ré-identifiée contre la bibliothèque — quelques
-millisecondes de plus, uniquement pour les gemmes concernées.
+An idle check does not re-answer the full question. It compares each gem against the
+descriptor of the icon *already shown* — nine dot products. Only a gem that no longer
+matches is re-identified against the library.
 
-Deux garde-fous :
+Two things it deliberately refuses to do:
 
-- **Une gemme en rechargement ne change pas l'affichage.** Son score chute exactement
-  comme le ferait un vrai changement de sort, mais elle ne ressemble alors franchement à
-  aucune icône : le seuil de remplacement (0,90) n'est pas atteint, l'icône reste en place.
-- **Une gemme illisible est ignorée** (emplacement vide, sort en cours de mémorisation) :
-  une zone uniforme ne porte aucune information et ne doit pas être lue comme un changement.
+- **A gem on cooldown never changes the display.** Its score drops exactly like a real
+  spell change would, but it then resembles no icon strongly enough to pass the
+  replacement threshold, so the icon stays put.
+- **An unreadable gem is ignored**, not treated as a change — an empty slot or a spell
+  being scribed is a flat patch, and a flat patch carries no information.
 
-## Données écrites
+## Where it stores things
 
-Le plugin n'écrit que dans son propre dossier
-(`%LOCALAPPDATA%\Logi\LogiPluginService\PluginData\EverQuest`) :
+Only in its own folder,
+`%LOCALAPPDATA%\Logi\LogiPluginService\PluginData\EverQuest`: the calibration
+(`barstate.txt`), the auto-refresh preference, and a copy of the nine icons for
+inspection. Deleting that folder is safe — everything is recomputed.
 
-| Fichier | Contenu |
-|---|---|
-| `barstate.txt` | Grille de la barre, pack d'icônes, icône retenue par gemme |
-| `icons\spell_1..9.png` | Les icônes affichées, pour inspection |
+## Known limits
 
-Supprimer ce dossier ne casse rien : tout est recalculé.
+Honest list, in rough order of how likely you are to hit them:
 
-## Approches écartées (et pourquoi)
+- **Display scaling.** The gem pitch is searched in a 38–47 px window, measured at 100 %
+  Windows scaling. Other DPI settings or EverQuest UI scales will fall outside it and
+  the bar will not be found. Widening the range was tried and makes it worse — it locks
+  onto a harmonic and reads the bar several gems off. This needs a proper fix.
+- **Exactly nine gems, stacked vertically.** A spell window arranged horizontally or in
+  two columns is not supported.
+- **Custom skins.** The 40 px cell size and the gem-socket grey are assumed. A third-party
+  skin with different metrics will degrade or break recognition.
+- **Nothing proves it found the *spell* bar.** A hotbar of nine spell icons at a similar
+  pitch would pass the same test.
+- **Exclusive fullscreen** cannot be captured. Use windowed or borderless.
+- **The UI is in French** — action names, key labels and log messages.
 
-À lire avant de « simplifier » quoi que ce soit — chacune a été essayée et mesurée.
+## Build notes
 
-- **Découper les icônes dans la capture d'écran.** L'interface est semi-transparente et
-  l'état du moment (recharge, surlignage, infobulle) pollue l'image. La capture sert à
-  *identifier* l'icône, jamais à la produire.
-- **Chercher la barre en balayant la bibliothèque sur toute la hauteur.** 267 s par
-  tentative, et résultat *faux* : verrouillage six gemmes plus bas, toutes les icônes
-  décalées. Remplacé par la périodicité (8 ms) suivie d'une remontée.
-- **Se fier à `CastSpellWnd/YPos` pour la position verticale.** `XPos` décode bien
-  (~5 px d'erreur), `YPos` donne 171 px d'écart quelle que soit l'interprétation.
-- **Dédupliquer les packs d'icônes par nom de fichier.** Les noms sont identiques d'un
-  pack à l'autre alors que le contenu diffère : on compare le contenu.
-- **Un script PowerShell appelé par le plugin** (l'architecture initiale). Coûtait
-  0,42 s de processeur par cycle rien qu'en démarrage de processus et compilation, et
-  obligeait à brider les relectures — ce qui retardait les vrais changements jusqu'à
-  17 s. Tout porter en C# dans le plugin a réglé les deux à la fois.
+Non-obvious things, learned the hard way, in case you fork this:
+
+- Target **`net10.0`**. The service's `PluginApi.dll` is .NET 10; the official DemoPlugin's
+  `net8.0` no longer compiles against it.
+- The assembly must contain **exactly one `Plugin` class and exactly one
+  `ClientApplication` class**, even for a plugin with no associated application. Without
+  the latter the service refuses to load it, with only "Cannot load plugin" in the log.
+- **Do not copy the service's assemblies** next to the plugin (`<Private>false</Private>`).
+  A duplicate `PluginApi.dll` makes the loader reject the plugin.
+- To fill a key edge to edge, `DefaultIconTemplate.ict` needs an image area of
+  `0,0,100,100` and its text item set to `isVisible: false` — the sample template
+  reserves 30 % of the height for a label.
+- Keep **nothing static that belongs to a plugin instance**. The service loads the new
+  instance *before* unloading the old one, so a static timer gets disposed by the
+  outgoing instance and the plugin goes silently idle.
+- Write numbers with `InvariantCulture`. String interpolation uses the machine locale,
+  and `"22,25"` will not parse back.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
+
+This project ships no EverQuest assets. It reads the icons from your own installation at
+runtime. EverQuest is a trademark of Daybreak Game Company LLC; this is an unofficial,
+unaffiliated fan project.
