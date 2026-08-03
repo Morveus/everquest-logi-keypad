@@ -32,7 +32,11 @@ namespace Loupedeck.EverQuestPlugin
         private const Single ChangeScore = 0.90f;
         // A challenger must beat the incumbent by this margin to take its place.
         private const Single Hysteresis = 0.05f;
-        // Average score required to trust a freshly located grid.
+        // Many EQ spells share art across ranks. If the best and second-best library
+        // icons are this close, the match carries no real information: keep what we show
+        // rather than pick confidently-wrong art.
+        private const Single MinMargin = 0.02f;
+        // Average score required to trust a grid.
         private const Single GridScore = 0.85f;
         // More mismatching gems than this means the geometry is probably wrong,
         // not the spells: re-locate the whole bar instead of re-identifying gems.
@@ -67,6 +71,10 @@ namespace Loupedeck.EverQuestPlugin
         private String _iconDir;
         private EqGame.UiSettings _ui;
         private Grid _grid;
+        // Grid as established by the last full locate. RefineGrid hill-climbs towards the
+        // icons currently displayed; if those were ever wrong it would optimise towards
+        // the wrong thing, so the refinement is never allowed to wander far from here.
+        private Grid _anchorGrid;
         private DateTime _lastLocateFailedUtc = DateTime.MinValue;
 
         public String DataDir { get; }
@@ -74,6 +82,14 @@ namespace Loupedeck.EverQuestPlugin
         public String LastStatus { get; private set; } = "jamais execute";
 
         public event EventHandler IconsChanged;
+        // Raised after every read so a key can show that the plugin is stuck.
+        public event EventHandler<ReadOutcome> StatusChanged;
+
+        private ReadOutcome Report(ReadOutcome outcome)
+        {
+            this.StatusChanged?.Invoke(this, outcome);
+            return outcome;
+        }
 
         public SpellBarReader(Plugin plugin, String dataDir)
         {
@@ -116,7 +132,7 @@ namespace Loupedeck.EverQuestPlugin
                 if (hwnd == IntPtr.Zero || EqGame.IsMinimized(hwnd))
                 {
                     this.LastStatus = "EverQuest absent";
-                    return ReadOutcome.NotRunning;
+                    return this.Report(ReadOutcome.NotRunning);
                 }
 
                 using (var bmp = EqGame.Capture(hwnd))
@@ -124,13 +140,13 @@ namespace Loupedeck.EverQuestPlugin
                     if (bmp == null)
                     {
                         this.LastStatus = "capture impossible";
-                        return ReadOutcome.NotRunning;
+                        return this.Report(ReadOutcome.NotRunning);
                     }
 
                     if (!this.EnsureLibrary())
                     {
                         this.LastStatus = "pack d'icones introuvable";
-                        return ReadOutcome.Unreadable;
+                        return this.Report(ReadOutcome.Unreadable);
                     }
 
                     // Cheap path: does every gem still show what we already display?
@@ -168,7 +184,7 @@ namespace Loupedeck.EverQuestPlugin
                         if (readable == 0 && known > 0)
                         {
                             this.LastStatus = "capture illisible";
-                            return ReadOutcome.Unreadable;
+                            return this.Report(ReadOutcome.Unreadable);
                         }
 
                         var suspicious = new List<Int32>();
@@ -180,7 +196,7 @@ namespace Loupedeck.EverQuestPlugin
                         if (suspicious.Count == 0)
                         {
                             this.LastStatus = "inchange";
-                            return ReadOutcome.NoChange;
+                            return this.Report(ReadOutcome.NoChange);
                         }
                         if (suspicious.Count <= MaxTargetedGems)
                         {
@@ -190,9 +206,9 @@ namespace Loupedeck.EverQuestPlugin
                             {
                                 this.SaveState();
                                 this.IconsChanged?.Invoke(this, EventArgs.Empty);
-                                return ReadOutcome.Updated;
+                                return this.Report(ReadOutcome.Updated);
                             }
-                            return ReadOutcome.NoChange;
+                            return this.Report(ReadOutcome.NoChange);
                         }
                     }
 
@@ -204,7 +220,7 @@ namespace Loupedeck.EverQuestPlugin
                         (DateTime.UtcNow - this._lastLocateFailedUtc).TotalSeconds < LocateRetrySeconds)
                     {
                         this.LastStatus = "barre non localisee (nouvel essai differe)";
-                        return ReadOutcome.Unreadable;
+                        return this.Report(ReadOutcome.Unreadable);
                     }
 
                     var screen = FloatImg.FromBitmap(bmp);
@@ -213,10 +229,11 @@ namespace Loupedeck.EverQuestPlugin
                     {
                         this._lastLocateFailedUtc = DateTime.UtcNow;
                         this.LastStatus = "barre non localisee";
-                        return ReadOutcome.Unreadable;
+                        return this.Report(ReadOutcome.Unreadable);
                     }
                     this._lastLocateFailedUtc = DateTime.MinValue;
                     this._grid = grid;
+                    this._anchorGrid = new Grid { X = grid.X, Y0 = grid.Y0, Size = grid.Size, Stride = grid.Stride };
 
                     var all = new List<Int32>();
                     for (var i = 0; i < GemCount; i++) { all.Add(i); }
@@ -226,9 +243,9 @@ namespace Loupedeck.EverQuestPlugin
                     if (changed > 0)
                     {
                         this.IconsChanged?.Invoke(this, EventArgs.Empty);
-                        return ReadOutcome.Updated;
+                        return this.Report(ReadOutcome.Updated);
                     }
-                    return ReadOutcome.NoChange;
+                    return this.Report(ReadOutcome.NoChange);
                 }
             }
         }
@@ -277,6 +294,18 @@ namespace Loupedeck.EverQuestPlugin
             return n == 0 ? Single.NaN : sum / n;
         }
 
+        // Refinement may only nudge the geometry, never walk it to another bar.
+        private Boolean WithinAnchor(Grid g)
+        {
+            var a = this._anchorGrid;
+            if (a == null) { return true; }
+            const Single maxDrift = 3f;
+            return Math.Abs(g.X - a.X) <= maxDrift
+                && Math.Abs(g.Y0 - a.Y0) <= maxDrift
+                && Math.Abs(g.Size - a.Size) <= maxDrift
+                && Math.Abs(g.Stride - a.Stride) <= 1f;
+        }
+
         // Nudge the grid so it best explains the icons we already display. Nine known
         // templates instead of the whole library makes this a few milliseconds, and it
         // keeps the geometry locked sub-pixel between full locates.
@@ -302,6 +331,7 @@ namespace Loupedeck.EverQuestPlugin
                                 Size = g.Size + dsz,
                                 Stride = g.Stride + dst,
                             };
+                            if (!this.WithinAnchor(cand)) { continue; }
                             var s = MeanScore(this.GemScores(strip, cand));
                             if (!Single.IsNaN(s) && s > bestScore) { bestScore = s; best = cand; }
                         }
@@ -324,11 +354,12 @@ namespace Loupedeck.EverQuestPlugin
                 if (!Matcher.Normalize(p)) { continue; }
 
                 LibIcon best = null;
-                Single bestScore = -1;
+                Single bestScore = -1, secondScore = -1;
                 foreach (var li in this._lib)
                 {
                     var s = Matcher.Dot(p, li.Norm24);
-                    if (s > bestScore) { bestScore = s; best = li; }
+                    if (s > bestScore) { secondScore = bestScore; bestScore = s; best = li; }
+                    else if (s > secondScore) { secondScore = s; }
                 }
                 if (best == null) { continue; }
 
@@ -350,6 +381,7 @@ namespace Loupedeck.EverQuestPlugin
                 // Only swap on a confident, clearly better match. A gem mid-recast never
                 // reaches this bar, so its icon stays put.
                 if (bestScore < ChangeScore || bestScore < incumbent + Hysteresis) { continue; }
+                if (bestScore - secondScore < MinMargin) { continue; }
 
                 if (this.ApplyIcon(i, best, bestScore)) { changed++; }
             }
@@ -450,6 +482,11 @@ namespace Loupedeck.EverQuestPlugin
             var xLo = Math.Max(0, seedX - 25);
             var xHi = seedX + 35;
 
+            // Proven range, deliberately narrow. Widening it let the periodicity lock
+            // onto a harmonic and the bar was read four gems too low; and picking the
+            // "topmost alignment that still scores" read it four gems too high, because
+            // best-match-over-2262-icons stays high on plain background - it says which
+            // icon is closest, never whether an icon is there at all.
             var per = Matcher.FindGridPeriodic(screen, xLo, xHi + 45, 38f, 47f, 0.5f, GemCount);
             var py = per[0];
             var ps = per[1];
@@ -459,8 +496,7 @@ namespace Loupedeck.EverQuestPlugin
             var found = Matcher.FindBar(screen, this._lib,
                 xLo, xHi + 20, py - ps / 2 - 4, py + ps / 2 + 4, szLo, szHi, ps - 1, ps + 1);
 
-            // 3. Climb: landing mid-bar would shift every icon, so walk up while a
-            //    well-matching gem sits one stride higher.
+            // 3. Climb one gem at a time while the cell above still reads as an icon.
             for (var up = 0; up < 13; up++)
             {
                 var yAbove = found.Y0 - found.Stride;
@@ -504,7 +540,16 @@ namespace Loupedeck.EverQuestPlugin
             this._ui = this._ui ?? EqGame.ReadUiSettings(this._gameDir);
 
             var packs = EqGame.FindIconPacks(this._gameDir, this._ui.Skin);
-            if (packs.Count == 0) { return false; }
+            if (packs.Count == 0)
+            {
+                // The remembered folder no longer holds icons (game moved or reinstalled).
+                // Forget it so the next cycle rediscovers instead of failing forever.
+                this._plugin?.Log.Warning($"No icon pack under '{this._gameDir}' - forgetting it");
+                this._gameDir = null;
+                this._iconDir = null;
+                this._ui = null;
+                return false;
+            }
 
             // Reuse the pack chosen previously; otherwise start with the first and let
             // ChooseBestPack correct it once the bar is located.

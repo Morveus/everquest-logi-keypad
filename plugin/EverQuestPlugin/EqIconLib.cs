@@ -12,6 +12,10 @@ namespace EqIcon
         public static Bitmap Load(string path)
         {
             byte[] d = File.ReadAllBytes(path);
+            // A skin can ship a truncated, colour-mapped or 16-bpp TGA. Without these
+            // checks the decoder throws IndexOutOfRange from inside the library load,
+            // which surfaces as a permanent error loop with the keys stuck.
+            if (d.Length < 18) { throw new Exception("TGA too short: " + path); }
             int idLen = d[0];
             int imageType = d[2];
             int w = d[12] | (d[13] << 8);
@@ -25,6 +29,11 @@ namespace EqIcon
                 throw new Exception("Unsupported TGA bpp " + bpp + " in " + path);
 
             int off = 18 + idLen;
+            if (w <= 0 || h <= 0 || w > 8192 || h > 8192) { throw new Exception("TGA bad size: " + path); }
+            if (imageType == 2 && off + (long)w * h * bytesPp > d.Length)
+            {
+                throw new Exception("TGA truncated: " + path);
+            }
             byte[] pix = new byte[w * h * 4]; // BGRA
             int count = w * h;
 
@@ -45,8 +54,10 @@ namespace EqIcon
                 int i = 0, s = off;
                 while (i < count)
                 {
+                    if (s >= d.Length) { throw new Exception("TGA truncated (RLE): " + path); }
                     byte hdr = d[s++];
                     int n = (hdr & 0x7F) + 1;
+                    if (i + n > count) { n = count - i; }
                     if ((hdr & 0x80) != 0)
                     {
                         byte b = d[s], g = d[s + 1], r = d[s + 2];
@@ -382,54 +393,6 @@ namespace EqIcon
                 if (s > best) { best = s; }
             }
             return best;
-        }
-
-        // Coarse sweep over a wide area with explicit steps, used to locate the bar when the
-        // cached grid no longer applies (fresh machine, bar moved, resolution changed).
-        // Returns { x, y0, size, stride, score }. Keep nGems small and the library short:
-        // cost is (positions x sizes x strides) * nGems * lib.Count.
-        public static float[] FindBarCoarse(FloatImg screen, List<LibIcon> lib,
-            float xMin, float xMax, float xStep,
-            float yMin, float yMax, float yStep,
-            float szMin, float szMax, float szStep,
-            float strMin, float strMax, float strStep,
-            int nGems)
-        {
-            float bx = xMin, by = yMin, bsz = szMin, bst = strMin, best = -1e9f;
-            for (float st = strMin; st <= strMax + 1e-4f; st += strStep)
-            {
-                // Do not run the grid off the bottom of the capture.
-                float maxY = Math.Min(yMax, screen.H - (nGems - 1) * st - szMax - 1);
-                for (float sz = szMin; sz <= szMax + 1e-4f; sz += szStep)
-                {
-                    for (float x = xMin; x <= xMax + 1e-4f; x += xStep)
-                    {
-                        for (float y = yMin; y <= maxY + 1e-4f; y += yStep)
-                        {
-                            float sc = ComboScore(screen, lib, x, y, sz, st, nGems, 8);
-                            if (sc > best) { best = sc; bx = x; by = y; bsz = sz; bst = st; }
-                        }
-                    }
-                }
-            }
-            return new[] { bx, by, bsz, bst, best / Math.Max(1, nGems > 3 ? nGems - 1 : nGems) };
-        }
-
-        // Build a small library from an explicit list of "sheet|index" keys (the icons we
-        // already know are on the bar). Locating with 9 known icons instead of ~2600 is
-        // roughly 300x cheaper, which is what makes a full-height sweep affordable.
-        public static List<LibIcon> Subset(List<LibIcon> lib, string[] keys)
-        {
-            var wanted = new HashSet<string>(keys);
-            var outp = new List<LibIcon>();
-            foreach (var li in lib)
-            {
-                if (wanted.Contains(li.Sheet + "|" + li.Index))
-                {
-                    outp.Add(li);
-                }
-            }
-            return outp;
         }
 
         // Find the icon grid of the spell bar: search icon x, first icon y, icon size, vertical stride.

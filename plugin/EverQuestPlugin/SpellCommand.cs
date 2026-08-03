@@ -18,20 +18,27 @@ namespace Loupedeck.EverQuestPlugin
             }
         }
 
+        // Remember the exact reader we subscribed to: during a plugin reload the static
+        // already points at the incoming instance, so unsubscribing through it would
+        // detach from the wrong object and leak this handler on the outgoing one.
+        private SpellBarReader _subscribed;
+
         protected override Boolean OnLoad()
         {
-            if (EverQuestPlugin.Reader != null)
+            this._subscribed = EverQuestPlugin.Reader;
+            if (this._subscribed != null)
             {
-                EverQuestPlugin.Reader.IconsChanged += this.OnIconsChanged;
+                this._subscribed.IconsChanged += this.OnIconsChanged;
             }
             return true;
         }
 
         protected override Boolean OnUnload()
         {
-            if (EverQuestPlugin.Reader != null)
+            if (this._subscribed != null)
             {
-                EverQuestPlugin.Reader.IconsChanged -= this.OnIconsChanged;
+                this._subscribed.IconsChanged -= this.OnIconsChanged;
+                this._subscribed = null;
             }
             return true;
         }

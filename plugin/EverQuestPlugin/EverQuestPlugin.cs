@@ -34,7 +34,7 @@ namespace Loupedeck.EverQuestPlugin
                 reader.RestoreImages();
                 return updater.RunAsync(full: false);
             });
-            this._updater.SetAutoUpdate(true);
+            this._updater.SetAutoUpdate(LoadAutoUpdatePreference(dataDir));
         }
 
         public override void Unload()
@@ -43,6 +43,33 @@ namespace Loupedeck.EverQuestPlugin
             // Only clear the statics if a newer instance has not already taken over.
             if (ReferenceEquals(Updater, this._updater)) { Updater = null; }
             if (ReferenceEquals(Reader, this._reader)) { Reader = null; }
+        }
+
+        // Turning auto-refresh off must survive a restart, otherwise the toggle looks
+        // broken after every reload of Options+.
+        private static String _autoPrefPath;
+
+        private static Boolean LoadAutoUpdatePreference(String dataDir)
+        {
+            _autoPrefPath = Path.Combine(dataDir, "autoupdate.txt");
+            try
+            {
+                if (File.Exists(_autoPrefPath))
+                {
+                    return !String.Equals(File.ReadAllText(_autoPrefPath).Trim(), "off", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception) { }
+            return true;
+        }
+
+        internal static void SaveAutoUpdatePreference(Boolean enabled)
+        {
+            try
+            {
+                if (_autoPrefPath != null) { File.WriteAllText(_autoPrefPath, enabled ? "on" : "off"); }
+            }
+            catch (Exception) { }
         }
 
         // Everything the plugin writes (calibration, debug icons) lives here. The SDK

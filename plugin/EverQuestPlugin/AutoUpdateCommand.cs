@@ -2,7 +2,7 @@ namespace Loupedeck.EverQuestPlugin
 {
     using System;
 
-    // Toggles the 30 s background refresh. Auto-update is on by default; this key only
+    // Toggles the background refresh. Auto-update is on by default; this key only
     // exists so it can be turned off (e.g. to keep the machine completely idle).
     public class AutoUpdateCommand : PluginDynamicCommand
     {
@@ -13,7 +13,11 @@ namespace Loupedeck.EverQuestPlugin
 
         protected override void RunCommand(String actionParameter)
         {
-            EverQuestPlugin.Updater?.SetAutoUpdate(EverQuestPlugin.Updater.AutoUpdateEnabled == false);
+            // Read the static once: it can become null between two accesses on unload.
+            var updater = EverQuestPlugin.Updater;
+            if (updater == null) { return; }
+            updater.SetAutoUpdate(!updater.AutoUpdateEnabled);
+            EverQuestPlugin.SaveAutoUpdatePreference(updater.AutoUpdateEnabled);
             this.ActionImageChanged();
         }
 
@@ -22,7 +26,8 @@ namespace Loupedeck.EverQuestPlugin
             using (var builder = new BitmapBuilder(imageSize))
             {
                 builder.Clear(BitmapColor.Black);
-                if (EverQuestPlugin.Updater?.AutoUpdateEnabled == true)
+                var updater = EverQuestPlugin.Updater;
+                if (updater != null && updater.AutoUpdateEnabled)
                 {
                     builder.DrawText("AUTO\nON", new BitmapColor(120, 220, 120));
                 }
