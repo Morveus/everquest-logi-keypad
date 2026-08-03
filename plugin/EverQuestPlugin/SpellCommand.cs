@@ -18,28 +18,15 @@ namespace Loupedeck.EverQuestPlugin
             }
         }
 
-        // Remember the exact reader we subscribed to: during a plugin reload the static
-        // already points at the incoming instance, so unsubscribing through it would
-        // detach from the wrong object and leak this handler on the outgoing one.
-        private SpellBarReader _subscribed;
-
         protected override Boolean OnLoad()
         {
-            this._subscribed = EverQuestPlugin.Reader;
-            if (this._subscribed != null)
-            {
-                this._subscribed.IconsChanged += this.OnIconsChanged;
-            }
+            EverQuestPlugin.IconsRefreshed += this.OnIconsChanged;
             return true;
         }
 
         protected override Boolean OnUnload()
         {
-            if (this._subscribed != null)
-            {
-                this._subscribed.IconsChanged -= this.OnIconsChanged;
-                this._subscribed = null;
-            }
+            EverQuestPlugin.IconsRefreshed -= this.OnIconsChanged;
             return true;
         }
 
@@ -86,7 +73,13 @@ namespace Loupedeck.EverQuestPlugin
             using (var builder = new BitmapBuilder(imageSize))
             {
                 builder.Clear(BitmapColor.Black);
-                builder.DrawText($"Spell {actionParameter}");
+                // An empty gem slot gets a blank key; only a gem we have never managed to
+                // read keeps a label, so "empty" and "not known yet" stay distinguishable.
+                if (Int32.TryParse(actionParameter, out var g) &&
+                    EverQuestPlugin.Reader?.IsGemEmpty(g) != true)
+                {
+                    builder.DrawText($"Spell {actionParameter}");
+                }
                 return builder.ToImage();
             }
         }

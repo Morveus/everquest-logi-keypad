@@ -14,15 +14,23 @@ namespace Loupedeck.EverQuestPlugin
     internal sealed class IconUpdater : IDisposable
     {
         public const Int32 DefaultIntervalSeconds = 5;
+        // How often the cached images are pushed to the keys again, independently of any
+        // scanning. Cheap: nine image hand-overs, no capture and no matching.
+        public const Int32 RepaintIntervalSeconds = 15;
 
         private readonly Object _sync = new Object();
         private readonly Plugin _plugin;
         private readonly SpellBarReader _reader;
         private Timer _timer;
+        private Timer _repaintTimer;
         private Int32 _busy;          // 0/1, guards against overlapping cycles
         private Boolean _disposed;
 
         public Boolean AutoUpdateEnabled { get; private set; }
+
+        // Pushes the cached key images to the device again. Costs nothing but a redraw:
+        // no capture, no matching. A safety net against the host dropping a repaint.
+        public Action ForceRepaint { get; set; }
 
         public IconUpdater(Plugin plugin, SpellBarReader reader)
         {
@@ -71,6 +79,8 @@ namespace Loupedeck.EverQuestPlugin
                 this.AutoUpdateEnabled = enabled;
                 this._timer?.Dispose();
                 this._timer = null;
+                this._repaintTimer?.Dispose();
+                this._repaintTimer = null;
                 if (!enabled)
                 {
                     this._plugin?.Log.Info("Auto-update disabled");
@@ -78,7 +88,16 @@ namespace Loupedeck.EverQuestPlugin
                 }
                 var period = TimeSpan.FromSeconds(intervalSeconds);
                 this._timer = new Timer(_ => { _ = this.RunAsync(false); }, null, period, period);
-                this._plugin?.Log.Info($"Auto-update enabled ({intervalSeconds} s)");
+
+                // Independent, deliberately dumb loop: re-assert the images we already
+                // hold. It fixes nothing about recognition - it only guarantees the keys
+                // eventually show what the plugin already knows, whatever the host did.
+                this._repaintTimer?.Dispose();
+                this._repaintTimer = new Timer(
+                    _ => { try { this.ForceRepaint?.Invoke(); } catch (Exception) { } },
+                    null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(RepaintIntervalSeconds));
+
+                this._plugin?.Log.Info($"Auto-update enabled ({intervalSeconds} s, repaint every {RepaintIntervalSeconds} s)");
             }
         }
 
@@ -89,6 +108,8 @@ namespace Loupedeck.EverQuestPlugin
                 this._disposed = true;
                 this._timer?.Dispose();
                 this._timer = null;
+                this._repaintTimer?.Dispose();
+                this._repaintTimer = null;
             }
         }
     }

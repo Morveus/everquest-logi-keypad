@@ -9,6 +9,15 @@ namespace Loupedeck.EverQuestPlugin
         public override Boolean UsesApplicationApiOnly => true;
         public override Boolean HasNoApplication => true;
 
+        // The service creates and loads the actions BEFORE Plugin.Load() runs, so an
+        // action cannot subscribe to the reader at OnLoad time - the reader does not
+        // exist yet. This static relay always exists, so subscription never depends on
+        // start-up order. (Symptom of getting this wrong: keys stay on their default
+        // rendering until pressed.)
+        internal static event EventHandler IconsRefreshed;
+
+        internal static void RaiseIconsRefreshed() => IconsRefreshed?.Invoke(null, EventArgs.Empty);
+
         // The actions look these up; they always point at the live instance.
         internal static SpellBarReader Reader { get; private set; }
         internal static IconUpdater Updater { get; private set; }
@@ -23,6 +32,8 @@ namespace Loupedeck.EverQuestPlugin
             this._updater = new IconUpdater(this, this._reader);
             Reader = this._reader;
             Updater = this._updater;
+            this._reader.IconsChanged += (_, __) => RaiseIconsRefreshed();
+            this._updater.ForceRepaint = RaiseIconsRefreshed;
             this.Log.Info($"Data directory: {dataDir}");
 
             // Rebuild last session's key images first (so the keys are never blank), then

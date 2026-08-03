@@ -51,6 +51,9 @@ namespace Loupedeck.EverQuestPlugin
         private const Int32 UnreadableStreakBeforeRelocate = 24;
         // Above this, the geometry is considered locked and no refinement is needed.
         private const Single GoodScore = 0.95f;
+        // Consecutive flat readings before declaring a gem slot empty. A spell being
+        // scribed also reads flat for a moment, so one cycle is not enough.
+        private const Int32 FlatStreakBeforeEmpty = 2;
 
         private sealed class Grid
         {
@@ -64,6 +67,8 @@ namespace Loupedeck.EverQuestPlugin
             public Single[] Norm24;       // descriptor of what is currently displayed
             public Byte[] Png;            // encoded key image
             public Single Score;
+            public Boolean KnownEmpty;    // the slot holds no spell (distinct from "unknown")
+            public Int32 FlatStreak;      // consecutive cycles reading as a flat patch
         }
 
         private readonly Plugin _plugin;
@@ -126,6 +131,12 @@ namespace Loupedeck.EverQuestPlugin
             if (png == null) { return null; }
             try { return BitmapImage.FromArray(png); }
             catch (Exception) { return null; }
+        }
+
+        public Boolean IsGemEmpty(Int32 gem)
+        {
+            if (gem < 1 || gem > GemCount) { return false; }
+            return this._gems[gem - 1].KnownEmpty;
         }
 
         // --- Main entry point --------------------------------------------------
@@ -193,11 +204,41 @@ namespace Loupedeck.EverQuestPlugin
                             return this.Report(ReadOutcome.Unreadable);
                         }
 
+                        // A gem reading flat while others read fine is an empty slot, not
+                        // a broken capture: clear its key instead of leaving a stale spell.
+                        var emptied = 0;
+                        for (var i = 0; i < GemCount; i++)
+                        {
+                            var st = this._gems[i];
+                            var flat = Single.IsNaN(scores[i]) && st.Norm24 != null;
+                            if (flat)
+                            {
+                                st.FlatStreak++;
+                                if (st.FlatStreak >= FlatStreakBeforeEmpty && !st.KnownEmpty)
+                                {
+                                    this.ClearGem(i);
+                                    emptied++;
+                                }
+                            }
+                            else if (!Single.IsNaN(scores[i]))
+                            {
+                                st.FlatStreak = 0;
+                            }
+                        }
+
                         var suspicious = new List<Int32>();
                         for (var i = 0; i < GemCount; i++)
                         {
                             if (!Single.IsNaN(scores[i]) && scores[i] < WatchScore) { suspicious.Add(i); }
-                            else if (this._gems[i].Norm24 == null) { suspicious.Add(i); }
+                            else if (this._gems[i].Norm24 == null && !this._gems[i].KnownEmpty) { suspicious.Add(i); }
+                        }
+                        if (suspicious.Count == 0 && emptied > 0)
+                        {
+                            this._unreadableStreak = 0;
+                            this.SaveState();
+                            this.IconsChanged?.Invoke(this, EventArgs.Empty);
+                            this.LastStatus = $"{emptied} slot(s) now empty";
+                            return this.Report(ReadOutcome.Updated);
                         }
                         if (suspicious.Count == 0)
                         {
@@ -372,7 +413,12 @@ namespace Loupedeck.EverQuestPlugin
             {
                 var st = this._gems[i];
                 var p = screen.Patch(this._grid.X, this._grid.Y0 + i * this._grid.Stride, this._grid.Size, this._grid.Size, 24);
-                if (!Matcher.Normalize(p)) { continue; }
+                if (!Matcher.Normalize(p))
+                {
+                    // Flat: an empty socket. Clear the key rather than keep a stale spell.
+                    if (!this._gems[i].KnownEmpty) { this.ClearGem(i); changed++; }
+                    continue;
+                }
 
                 LibIcon best = null;
                 Single bestScore = -1, secondScore = -1;
@@ -409,6 +455,25 @@ namespace Loupedeck.EverQuestPlugin
             return changed;
         }
 
+        // Blank a key: the slot holds no spell.
+        private void ClearGem(Int32 gemIndex)
+        {
+            var st = this._gems[gemIndex];
+            lock (this._pngLock) { st.Png = null; }
+            st.Sheet = null;
+            st.Index = -1;
+            st.Norm24 = null;
+            st.Score = 0;
+            st.KnownEmpty = true;
+            st.FlatStreak = 0;
+            try
+            {
+                var f = Path.Combine(this.IconsDir, $"spell_{gemIndex + 1}.png");
+                if (File.Exists(f)) { File.Delete(f); }
+            }
+            catch (Exception) { }
+        }
+
         private Boolean ApplyIcon(Int32 gemIndex, LibIcon icon, Single score)
         {
             try
@@ -420,6 +485,8 @@ namespace Loupedeck.EverQuestPlugin
                     var st = this._gems[gemIndex];
                     lock (this._pngLock) { st.Png = png; }
                     st.Sheet = icon.Sheet;
+                    st.KnownEmpty = false;
+                    st.FlatStreak = 0;
                     st.Index = icon.Index;
                     st.Norm24 = icon.Norm24;
                     st.Score = score;
@@ -636,7 +703,8 @@ namespace Loupedeck.EverQuestPlugin
                 for (var i = 0; i < GemCount; i++)
                 {
                     var st = this._gems[i];
-                    if (st.Sheet != null) { lines.Add($"gem{i + 1}={st.Sheet}|{st.Index}"); }
+                    if (st.KnownEmpty) { lines.Add($"gem{i + 1}=empty"); }
+                    else if (st.Sheet != null) { lines.Add($"gem{i + 1}={st.Sheet}|{st.Index}"); }
                 }
                 File.WriteAllLines(this.StatePath, lines);
             }
@@ -674,6 +742,7 @@ namespace Loupedeck.EverQuestPlugin
                     {
                         if (Int32.TryParse(key.Substring(3), out var n) && n >= 1 && n <= GemCount)
                         {
+                            if (val == "empty") { this._gems[n - 1].KnownEmpty = true; continue; }
                             var cut = val.LastIndexOf('|');
                             if (cut > 0 && Int32.TryParse(val.Substring(cut + 1), out var idx))
                             {
