@@ -1,5 +1,7 @@
 # EverQuest Spells — Logi MX Creative Console plugin
 
+(disclaimer : this is 100% vibe coded)
+
 Your nine spell gems, live on your keypad.
 
 This plugin watches the EverQuest window, recognises which spells you have memorised,
