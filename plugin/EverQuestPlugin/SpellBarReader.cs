@@ -40,6 +40,8 @@ namespace Loupedeck.EverQuestPlugin
         // Locating the bar from scratch sweeps the library over the window: expensive and
         // rare. Do not retry it more often than this after a failure.
         private const Int32 LocateRetrySeconds = 120;
+        // Above this, the geometry is considered locked and no refinement is needed.
+        private const Single GoodScore = 0.95f;
 
         private sealed class Grid
         {
@@ -48,10 +50,10 @@ namespace Loupedeck.EverQuestPlugin
 
         private sealed class GemState
         {
-            public String Sheet;          // full path of the source sheet, null if fallback crop
+            public String Sheet;          // full path of the source sheet
             public Int32 Index = -1;
             public Single[] Norm24;       // descriptor of what is currently displayed
-            public BitmapImage Image;
+            public Byte[] Png;            // encoded key image
             public Single Score;
         }
 
@@ -83,12 +85,20 @@ namespace Loupedeck.EverQuestPlugin
             this.LoadState();
         }
 
+        // Returns a fresh BitmapImage each call. Handing out a shared instance and
+        // disposing it on the next update raced with the SDK drawing the key: the draw
+        // threw and Options+ fell back to showing the action's name as text.
         public BitmapImage GetImage(Int32 gem)
         {
+            Byte[] png;
             lock (this._sync)
             {
-                return (gem >= 1 && gem <= GemCount) ? this._gems[gem - 1].Image : null;
+                if (gem < 1 || gem > GemCount) { return null; }
+                png = this._gems[gem - 1].Png;
             }
+            if (png == null) { return null; }
+            try { return BitmapImage.FromArray(png); }
+            catch (Exception) { return null; }
         }
 
         // --- Main entry point --------------------------------------------------
@@ -130,7 +140,22 @@ namespace Loupedeck.EverQuestPlugin
                             (Int32)(this._grid.Size + 2 * margin),
                             (Int32)((GemCount - 1) * this._grid.Stride + this._grid.Size + 2 * margin));
 
-                        var suspicious = this.FindSuspiciousGems(strip);
+                        // The stored grid is only as precise as the last full locate, and
+                        // sub-pixel drift alone drops every score enough to look like a
+                        // change. Re-lock it on the icons we already know before judging.
+                        var scores = this.GemScores(strip, this._grid);
+                        if (WorstScore(scores) < GoodScore)
+                        {
+                            this.RefineGrid(strip);
+                            scores = this.GemScores(strip, this._grid);
+                        }
+
+                        var suspicious = new List<Int32>();
+                        for (var i = 0; i < GemCount; i++)
+                        {
+                            if (!Single.IsNaN(scores[i]) && scores[i] < WatchScore) { suspicious.Add(i); }
+                            else if (this._gems[i].Norm24 == null) { suspicious.Add(i); }
+                        }
                         if (suspicious.Count == 0)
                         {
                             this.LastStatus = "inchange";
@@ -189,30 +214,80 @@ namespace Loupedeck.EverQuestPlugin
 
         // --- Watch pass --------------------------------------------------------
 
-        private List<Int32> FindSuspiciousGems(FloatImg screen)
+        // How well each gem still matches the icon it currently displays.
+        // NaN means "no information": a flat patch (empty slot, spell being scribed) or
+        // a gem we have never identified. It must not be read as "this gem changed".
+        private Single[] GemScores(FloatImg img, Grid g)
         {
-            var outp = new List<Int32>();
+            var outp = new Single[GemCount];
             for (var i = 0; i < GemCount; i++)
             {
                 var st = this._gems[i];
-                if (st.Norm24 == null)
-                {
-                    outp.Add(i);
-                    continue;
-                }
-                var p = this.GemPatch(screen, i, 24);
-                // A flat patch carries no information (empty slot, spell being scribed):
-                // it must not be read as "this gem changed".
-                if (!Matcher.Normalize(p)) { continue; }
-                if (Matcher.Dot(p, st.Norm24) < WatchScore) { outp.Add(i); }
+                if (st.Norm24 == null) { outp[i] = Single.NaN; continue; }
+                var p = img.Patch(g.X, g.Y0 + i * g.Stride, g.Size, g.Size, 24);
+                outp[i] = Matcher.Normalize(p) ? Matcher.Dot(p, st.Norm24) : Single.NaN;
             }
             return outp;
         }
 
-        private Single[] GemPatch(FloatImg screen, Int32 gemIndex, Int32 size)
+        private static Single WorstScore(Single[] scores)
         {
-            var y = this._grid.Y0 + gemIndex * this._grid.Stride;
-            return screen.Patch(this._grid.X, y, this._grid.Size, this._grid.Size, size);
+            var worst = Single.MaxValue;
+            var any = false;
+            foreach (var s in scores)
+            {
+                if (Single.IsNaN(s)) { continue; }
+                any = true;
+                if (s < worst) { worst = s; }
+            }
+            return any ? worst : Single.NaN;
+        }
+
+        private static Single MeanScore(Single[] scores)
+        {
+            Single sum = 0;
+            var n = 0;
+            foreach (var s in scores)
+            {
+                if (Single.IsNaN(s)) { continue; }
+                sum += s;
+                n++;
+            }
+            return n == 0 ? Single.NaN : sum / n;
+        }
+
+        // Nudge the grid so it best explains the icons we already display. Nine known
+        // templates instead of the whole library makes this a few milliseconds, and it
+        // keeps the geometry locked sub-pixel between full locates.
+        private void RefineGrid(FloatImg strip)
+        {
+            var g = this._grid;
+            var bestScore = MeanScore(this.GemScores(strip, g));
+            if (Single.IsNaN(bestScore)) { return; }
+            var best = g;
+
+            foreach (var dx in new[] { -0.5f, -0.25f, 0f, 0.25f, 0.5f })
+            {
+                foreach (var dy in new[] { -0.5f, -0.25f, 0f, 0.25f, 0.5f })
+                {
+                    foreach (var dsz in new[] { -0.5f, 0f, 0.5f })
+                    {
+                        foreach (var dst in new[] { -0.125f, 0f, 0.125f })
+                        {
+                            var cand = new Grid
+                            {
+                                X = g.X + dx,
+                                Y0 = g.Y0 + dy,
+                                Size = g.Size + dsz,
+                                Stride = g.Stride + dst,
+                            };
+                            var s = MeanScore(this.GemScores(strip, cand));
+                            if (!Single.IsNaN(s) && s > bestScore) { bestScore = s; best = cand; }
+                        }
+                    }
+                }
+            }
+            this._grid = best;
         }
 
         // --- Identification ----------------------------------------------------
@@ -224,7 +299,7 @@ namespace Loupedeck.EverQuestPlugin
             foreach (var i in gems)
             {
                 var st = this._gems[i];
-                var p = this.GemPatch(screen, i, 24);
+                var p = screen.Patch(this._grid.X, this._grid.Y0 + i * this._grid.Stride, this._grid.Size, this._grid.Size, 24);
                 if (!Matcher.Normalize(p)) { continue; }
 
                 LibIcon best = null;
@@ -248,7 +323,7 @@ namespace Loupedeck.EverQuestPlugin
                     // here makes every gem look suspicious forever, which sends every
                     // cycle down the expensive path.
                     st.Norm24 = best.Norm24;
-                    if (st.Image == null) { this.ApplyIcon(i, best, bestScore); }
+                    if (st.Png == null) { this.ApplyIcon(i, best, bestScore); }
                     continue;
                 }
                 // Only swap on a confident, clearly better match. A gem mid-recast never
@@ -269,8 +344,7 @@ namespace Loupedeck.EverQuestPlugin
                     if (bmp40 == null) { return false; }
                     var png = EncodeScaledPng(bmp40, 128);
                     var st = this._gems[gemIndex];
-                    st.Image?.Dispose();
-                    st.Image = BitmapImage.FromArray(png);
+                    st.Png = png;
                     st.Sheet = icon.Sheet;
                     st.Index = icon.Index;
                     st.Norm24 = icon.Norm24;
@@ -538,7 +612,7 @@ namespace Loupedeck.EverQuestPlugin
                 for (var i = 0; i < GemCount; i++)
                 {
                     var st = this._gems[i];
-                    if (st.Sheet == null || st.Image != null) { continue; }
+                    if (st.Sheet == null || st.Png != null) { continue; }
                     if (byKey.TryGetValue(st.Sheet + "|" + st.Index, out var li))
                     {
                         this.ApplyIcon(i, li, st.Score);
