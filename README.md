@@ -138,7 +138,6 @@ Honest list, in rough order of how likely you are to hit them:
 - **Nothing proves it found the *spell* bar.** A hotbar of nine spell icons at a similar
   pitch would pass the same test.
 - **Exclusive fullscreen** cannot be captured. Use windowed or borderless.
-- **All user-facing text is in English.
 
 ## Build notes
 
