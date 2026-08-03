@@ -44,6 +44,11 @@ namespace Loupedeck.EverQuestPlugin
         // Locating the bar from scratch sweeps the library over the window: expensive and
         // rare. Do not retry it more often than this after a failure.
         private const Int32 LocateRetrySeconds = 120;
+        // Consecutive cycles where nothing could be identified before we suspect the
+        // geometry rather than the game state. At 5 s a cycle this is ~2 minutes, which
+        // a long fight can exceed but a moved window will too - and the Refresh key is
+        // always the immediate way out.
+        private const Int32 UnreadableStreakBeforeRelocate = 24;
         // Above this, the geometry is considered locked and no refinement is needed.
         private const Single GoodScore = 0.95f;
 
@@ -76,6 +81,7 @@ namespace Loupedeck.EverQuestPlugin
         // the wrong thing, so the refinement is never allowed to wander far from here.
         private Grid _anchorGrid;
         private DateTime _lastLocateFailedUtc = DateTime.MinValue;
+        private Int32 _unreadableStreak;
 
         public String DataDir { get; }
         public String IconsDir => Path.Combine(this.DataDir, "icons");
@@ -195,19 +201,34 @@ namespace Loupedeck.EverQuestPlugin
                         }
                         if (suspicious.Count == 0)
                         {
+                            this._unreadableStreak = 0;
                             this.LastStatus = "unchanged";
                             return this.Report(ReadOutcome.NoChange);
                         }
-                        if (suspicious.Count <= MaxTargetedGems)
+                        // Re-identify whatever no longer matches, however many. Assuming
+                        // "more than N gems differ, so the geometry must be wrong" was a
+                        // mistake: swapping a whole spell set is routine, and it sent the
+                        // plugin into a minute-long relocate that produced no icons at all.
+                        // Only fall through to relocating when the gems cannot be
+                        // identified at all, which is what a bad grid actually looks like.
+                        var n = this.ReidentifyGems(strip, suspicious);
+                        if (n > 0)
                         {
-                            var n = this.ReidentifyGems(strip, suspicious);
-                            this.LastStatus = n > 0 ? $"{n} icon(s) updated" : "gem(s) in transition";
-                            if (n > 0)
-                            {
-                                this.SaveState();
-                                this.IconsChanged?.Invoke(this, EventArgs.Empty);
-                                return this.Report(ReadOutcome.Updated);
-                            }
+                            this._unreadableStreak = 0;
+                            this.LastStatus = $"{n} icon(s) updated";
+                            this.SaveState();
+                            this.IconsChanged?.Invoke(this, EventArgs.Empty);
+                            return this.Report(ReadOutcome.Updated);
+                        }
+                        // Nothing could be identified. In combat EverQuest tints and
+                        // darkens the gems for minutes on end, so this is the normal
+                        // state of a busy fight - not a sign the geometry moved. Keep
+                        // showing what we have and only consider relocating after a long
+                        // sustained streak; the Refresh key forces it at any time.
+                        this._unreadableStreak++;
+                        if (this._unreadableStreak < UnreadableStreakBeforeRelocate)
+                        {
+                            this.LastStatus = $"gem(s) in transition ({this._unreadableStreak})";
                             return this.Report(ReadOutcome.NoChange);
                         }
                     }
@@ -675,6 +696,8 @@ namespace Loupedeck.EverQuestPlugin
                 var byKey = new Dictionary<String, LibIcon>();
                 foreach (var li in this._lib) { byKey[li.Sheet + "|" + li.Index] = li; }
 
+                var known = 0;
+                foreach (var st0 in this._gems) { if (st0.Sheet != null) { known++; } }
                 var restored = 0;
                 for (var i = 0; i < GemCount; i++)
                 {
@@ -688,6 +711,7 @@ namespace Loupedeck.EverQuestPlugin
                 // Without this the keys keep whatever the host drew before: the first
                 // read after a reload finds everything already correct, reports
                 // NoChange, and nothing ever asks them to repaint.
+                this._plugin?.Log.Info($"RestoreImages: {known} gem(s) in saved state, {restored} rebuilt, library={this._lib?.Count ?? 0} from '{this._iconDir}'");
                 if (restored > 0) { this.IconsChanged?.Invoke(this, EventArgs.Empty); }
             }
         }
