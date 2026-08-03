@@ -14,7 +14,7 @@ namespace Loupedeck.EverQuestPlugin
                 // Layout-neutral label on purpose: the keystroke is sent by physical key
                 // position, so this is ALT+& on AZERTY and ALT+1 on QWERTY. Naming the
                 // AZERTY character here would read as a bug on any other layout.
-                this.AddParameter($"{i}", $"Sort {i} (ALT+{i})", "Sorts EverQuest");
+                this.AddParameter($"{i}", $"Spell {i} (ALT+{i})", "EverQuest Spells");
             }
         }
 
@@ -76,7 +76,7 @@ namespace Loupedeck.EverQuestPlugin
             using (var builder = new BitmapBuilder(imageSize))
             {
                 builder.Clear(BitmapColor.Black);
-                builder.DrawText($"Sort {actionParameter}");
+                builder.DrawText($"Spell {actionParameter}");
                 return builder.ToImage();
             }
         }

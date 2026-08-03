@@ -11,11 +11,11 @@ namespace Loupedeck.EverQuestPlugin
     public class UpdateIconsCommand : PluginDynamicCommand
     {
         private Int32 _running;          // 0/1
-        private volatile String _label = "MAJ";
+        private volatile String _label = "SYNC";
         private volatile Boolean _failed;
 
         public UpdateIconsCommand()
-            : base(displayName: "Mettre à jour les icônes", description: "Relit la barre de sorts EverQuest et met à jour les icônes des touches", groupName: "Sorts EverQuest")
+            : base(displayName: "Refresh icons", description: "Re-reads the EverQuest spell bar and updates the key icons. Turns red when the plugin cannot read the bar.", groupName: "EverQuest Spells")
         {
         }
 
@@ -39,7 +39,7 @@ namespace Loupedeck.EverQuestPlugin
             var failed = outcome == ReadOutcome.Unreadable;
             if (failed == this._failed && Volatile.Read(ref this._running) == 0) { return; }
             this._failed = failed;
-            this._label = failed ? "LIRE\nKO" : "MAJ";
+            this._label = failed ? "READ\nFAIL" : "SYNC";
             this.ActionImageChanged();
         }
 
@@ -49,16 +49,16 @@ namespace Loupedeck.EverQuestPlugin
             if (updater == null) { return; }
             if (Interlocked.CompareExchange(ref this._running, 1, 0) != 0) { return; }
 
-            this._label = "MAJ...";
+            this._label = "SYNC...";
             this.ActionImageChanged();
 
             updater.RunAsync(full: true).ContinueWith(t =>
             {
                 var bad = t.IsFaulted || t.Result == ReadOutcome.Unreadable || t.Result == ReadOutcome.NotRunning;
                 this._failed = bad;
-                this._label = t.IsFaulted ? "ERREUR"
-                    : t.Result == ReadOutcome.NotRunning ? "EQ ?"
-                    : bad ? "LIRE\nKO" : "MAJ";
+                this._label = t.IsFaulted ? "ERROR"
+                    : t.Result == ReadOutcome.NotRunning ? "NO EQ"
+                    : bad ? "READ\nFAIL" : "SYNC";
                 Volatile.Write(ref this._running, 0);
                 this.ActionImageChanged();
             });

@@ -79,7 +79,7 @@ namespace Loupedeck.EverQuestPlugin
 
         public String DataDir { get; }
         public String IconsDir => Path.Combine(this.DataDir, "icons");
-        public String LastStatus { get; private set; } = "jamais execute";
+        public String LastStatus { get; private set; } = "never run";
 
         public event EventHandler IconsChanged;
         // Raised after every read so a key can show that the plugin is stuck.
@@ -131,7 +131,7 @@ namespace Loupedeck.EverQuestPlugin
                 var hwnd = EqGame.FindWindow();
                 if (hwnd == IntPtr.Zero || EqGame.IsMinimized(hwnd))
                 {
-                    this.LastStatus = "EverQuest absent";
+                    this.LastStatus = "EverQuest not running";
                     return this.Report(ReadOutcome.NotRunning);
                 }
 
@@ -139,13 +139,13 @@ namespace Loupedeck.EverQuestPlugin
                 {
                     if (bmp == null)
                     {
-                        this.LastStatus = "capture impossible";
+                        this.LastStatus = "capture failed";
                         return this.Report(ReadOutcome.NotRunning);
                     }
 
                     if (!this.EnsureLibrary())
                     {
-                        this.LastStatus = "pack d'icones introuvable";
+                        this.LastStatus = "icon pack not found";
                         return this.Report(ReadOutcome.Unreadable);
                     }
 
@@ -183,7 +183,7 @@ namespace Loupedeck.EverQuestPlugin
                         }
                         if (readable == 0 && known > 0)
                         {
-                            this.LastStatus = "capture illisible";
+                            this.LastStatus = "capture unreadable";
                             return this.Report(ReadOutcome.Unreadable);
                         }
 
@@ -195,13 +195,13 @@ namespace Loupedeck.EverQuestPlugin
                         }
                         if (suspicious.Count == 0)
                         {
-                            this.LastStatus = "inchange";
+                            this.LastStatus = "unchanged";
                             return this.Report(ReadOutcome.NoChange);
                         }
                         if (suspicious.Count <= MaxTargetedGems)
                         {
                             var n = this.ReidentifyGems(strip, suspicious);
-                            this.LastStatus = n > 0 ? $"{n} icone(s) mise(s) a jour" : "gemme(s) en transition";
+                            this.LastStatus = n > 0 ? $"{n} icon(s) updated" : "gem(s) in transition";
                             if (n > 0)
                             {
                                 this.SaveState();
@@ -219,7 +219,7 @@ namespace Loupedeck.EverQuestPlugin
                     if (!forceFull && this._lastLocateFailedUtc != DateTime.MinValue &&
                         (DateTime.UtcNow - this._lastLocateFailedUtc).TotalSeconds < LocateRetrySeconds)
                     {
-                        this.LastStatus = "barre non localisee (nouvel essai differe)";
+                        this.LastStatus = "spell bar not found (retry deferred)";
                         return this.Report(ReadOutcome.Unreadable);
                     }
 
@@ -228,7 +228,7 @@ namespace Loupedeck.EverQuestPlugin
                     if (grid == null)
                     {
                         this._lastLocateFailedUtc = DateTime.UtcNow;
-                        this.LastStatus = "barre non localisee";
+                        this.LastStatus = "spell bar not found";
                         return this.Report(ReadOutcome.Unreadable);
                     }
                     this._lastLocateFailedUtc = DateTime.MinValue;
@@ -239,7 +239,7 @@ namespace Loupedeck.EverQuestPlugin
                     for (var i = 0; i < GemCount; i++) { all.Add(i); }
                     var changed = this.ReidentifyGems(screen, all);
                     this.SaveState();
-                    this.LastStatus = changed > 0 ? $"{changed} icone(s) mise(s) a jour" : "inchange";
+                    this.LastStatus = changed > 0 ? $"{changed} icon(s) updated" : "unchanged";
                     if (changed > 0)
                     {
                         this.IconsChanged?.Invoke(this, EventArgs.Empty);
@@ -675,15 +675,20 @@ namespace Loupedeck.EverQuestPlugin
                 var byKey = new Dictionary<String, LibIcon>();
                 foreach (var li in this._lib) { byKey[li.Sheet + "|" + li.Index] = li; }
 
+                var restored = 0;
                 for (var i = 0; i < GemCount; i++)
                 {
                     var st = this._gems[i];
                     if (st.Sheet == null || st.Png != null) { continue; }
-                    if (byKey.TryGetValue(st.Sheet + "|" + st.Index, out var li))
+                    if (byKey.TryGetValue(st.Sheet + "|" + st.Index, out var li) && this.ApplyIcon(i, li, st.Score))
                     {
-                        this.ApplyIcon(i, li, st.Score);
+                        restored++;
                     }
                 }
+                // Without this the keys keep whatever the host drew before: the first
+                // read after a reload finds everything already correct, reports
+                // NoChange, and nothing ever asks them to repaint.
+                if (restored > 0) { this.IconsChanged?.Invoke(this, EventArgs.Empty); }
             }
         }
     }

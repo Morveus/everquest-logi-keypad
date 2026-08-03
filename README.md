@@ -50,13 +50,13 @@ dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release -p:PluginA
 
 In Options+, select your MX Creative Console. In the actions panel on the right, click
 **ALL ACTIONS** at the top — it is filtered to *System Actions* by default and the
-plugin will not show up until you do. Then find the **Sorts EverQuest** group and drag:
+plugin will not show up until you do. Then find the **EverQuest Spells** group and drag:
 
 | Action | What it does |
 |---|---|
-| **Sort 1 … Sort 9** | Shows the spell icon, sends ALT + the matching number-row key |
-| **Mettre à jour les icônes** | Forces a full re-read; also the status light (red = stuck) |
-| **Mise à jour auto** | Turns the background refresh on/off (on by default) |
+| **Spell 1 … Spell 9** | Shows the spell icon, sends ALT + the matching number-row key |
+| **Refresh icons** | Forces a full re-read; also the status light (red = stuck) |
+| **Auto refresh** | Turns the background refresh on/off (on by default) |
 
 The keystroke is sent by *physical key position*, so it is ALT+1…ALT+9 on QWERTY and
 ALT+&, ALT+é, ALT+"… on AZERTY — whichever your EverQuest binds expect. Change your in-game
@@ -138,7 +138,7 @@ Honest list, in rough order of how likely you are to hit them:
 - **Nothing proves it found the *spell* bar.** A hotbar of nine spell icons at a similar
   pitch would pass the same test.
 - **Exclusive fullscreen** cannot be captured. Use windowed or borderless.
-- **The UI is in French** — action names, key labels and log messages.
+- **All user-facing text is in English.
 
 ## Build notes
 
