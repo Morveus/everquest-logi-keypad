@@ -609,11 +609,23 @@ namespace Loupedeck.EverQuestPlugin
             // "topmost alignment that still scores" read it four gems too high, because
             // best-match-over-2262-icons stays high on plain background - it says which
             // icon is closest, never whether an icon is there at all.
+            // EverQuest offers several spell-bar layouts (normal gems, small gems, small
+            // with text, small with text and numbers). They all stack square icons at a
+            // fixed vertical pitch, but the pitch differs a lot between them, and so does
+            // the Windows/UI scaling on top.
+            //
+            // Each range is swept SEPARATELY and kept narrow on purpose. One wide range
+            // lets the periodicity lock onto a harmonic of the true pitch - that is how
+            // the bar once got read four gems too low, shifting every icon silently.
             BarFit best = null;
             foreach (var band in bands)
             {
-                var cand = this.LocateInBand(screen, band[0], band[1]);
-                if (best == null || Average(cand) > Average(best)) { best = cand; }
+                foreach (var pitch in PitchRanges)
+                {
+                    var cand = this.LocateInBand(screen, band[0], band[1], pitch[0], pitch[1]);
+                    if (best == null || Average(cand) > Average(best)) { best = cand; }
+                    if (Average(best) >= GridScore) { break; }
+                }
                 if (Average(best) >= GridScore) { break; }
             }
             var found = best;
@@ -633,9 +645,20 @@ namespace Loupedeck.EverQuestPlugin
 
         // Sweep one horizontal band: find the vertical pitch, lock the grid on it, then
         // climb to the topmost gem.
-        private BarFit LocateInBand(FloatImg screen, Int32 xLo, Int32 xHi)
+        // Plausible vertical pitches, most common first. Narrow on purpose - see the
+        // comment at the call site about harmonics.
+        private static readonly Single[][] PitchRanges =
         {
-            var per = Matcher.FindGridPeriodic(screen, xLo, xHi + 45, 38f, 47f, 0.5f, GemCount);
+            new[] { 38f, 47f },   // normal gems at 100% scaling (the common case)
+            new[] { 28f, 38f },   // the "small gems" layouts
+            new[] { 47f, 60f },   // normal gems on a scaled-up display
+            new[] { 20f, 28f },   // small gems on a scaled-down display
+            new[] { 60f, 85f },   // heavily scaled up
+        };
+
+        private BarFit LocateInBand(FloatImg screen, Int32 xLo, Int32 xHi, Single pitchLo, Single pitchHi)
+        {
+            var per = Matcher.FindGridPeriodic(screen, xLo, xHi + 45, pitchLo, pitchHi, 0.5f, GemCount);
             var py = per[0];
             var ps = per[1];
             // The icon does not fill its cell the same way in every skin: the classic
