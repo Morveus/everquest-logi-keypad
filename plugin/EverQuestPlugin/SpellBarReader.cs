@@ -583,19 +583,65 @@ namespace Loupedeck.EverQuestPlugin
 
             // 2. Locate by structure: the gems repeat at a fixed vertical stride, which
             //    is found over the full window height in milliseconds.
-            var seedX = this._ui?.BarXPercent != null ? (Int32)(screen.W * this._ui.BarXPercent.Value / 100.0) : 12;
-            var xLo = Math.Max(0, seedX - 25);
-            var xHi = seedX + 35;
+            // Candidate horizontal bands to sweep, most likely first. The spell window
+            // can be docked against either edge: XRef says which edge XPos is measured
+            // from, and reading XPos while ignoring XRef would send the search to the
+            // wrong side of the screen for a right-docked bar.
+            var bands = new List<Int32[]>();
+            if (this._ui?.BarXPercent != null)
+            {
+                var pct = this._ui.BarXPercent.Value;
+                var anchoredRight = this._ui.BarXRef != null && this._ui.BarXRef.StartsWith("right", StringComparison.Ordinal);
+                var seed = anchoredRight
+                    ? (Int32)(screen.W + screen.W * pct / 100.0)
+                    : (Int32)(screen.W * pct / 100.0);
+                bands.Add(new[] { Math.Max(0, seed - 25), Math.Min(screen.W - 1, seed + 35) });
+            }
+            // Fallbacks, in case the UI file is missing or says something unexpected.
+            bands.Add(new[] { 0, 100 });
+            bands.Add(new[] { Math.Max(0, screen.W - 130), screen.W - 1 });
+
+            var xLo = bands[0][0];
+            var xHi = bands[0][1];
 
             // Proven range, deliberately narrow. Widening it let the periodicity lock
             // onto a harmonic and the bar was read four gems too low; and picking the
             // "topmost alignment that still scores" read it four gems too high, because
             // best-match-over-2262-icons stays high on plain background - it says which
             // icon is closest, never whether an icon is there at all.
+            BarFit best = null;
+            foreach (var band in bands)
+            {
+                var cand = this.LocateInBand(screen, band[0], band[1]);
+                if (best == null || Average(cand) > Average(best)) { best = cand; }
+                if (Average(best) >= GridScore) { break; }
+            }
+            var found = best;
+
+            // 4. Now that the gems are located, check we are reading the icon pack the
+            //    game actually draws; if not, switch and re-match against the winner.
+            if (this.ChooseBestPack(screen, found))
+            {
+                found = Matcher.FindBar(screen, this._lib,
+                    found.X - 0.5f, found.X + 0.5f, found.Y0 - 0.5f, found.Y0 + 0.5f,
+                    found.Scale - 0.5f, found.Scale + 0.5f, found.Stride - 0.25f, found.Stride + 0.25f);
+            }
+
+            return Average(found) >= GridScore ? ToGrid(found) : null;
+        }
+
+
+        // Sweep one horizontal band: find the vertical pitch, lock the grid on it, then
+        // climb to the topmost gem.
+        private BarFit LocateInBand(FloatImg screen, Int32 xLo, Int32 xHi)
+        {
             var per = Matcher.FindGridPeriodic(screen, xLo, xHi + 45, 38f, 47f, 0.5f, GemCount);
             var py = per[0];
             var ps = per[1];
-            var szLo = (Int32)Math.Max(20, ps * 0.72f);
+            // The icon does not fill its cell the same way in every skin: the classic
+            // skins draw 24 px inside a 40 px cell (0.60) while default_modern draws
+            // 36 px (0.90). A 0.72 floor silently excluded the classic skins entirely.
+            var szLo = (Int32)Math.Max(14, ps * 0.50f);
             var szHi = (Int32)(ps * 0.98f);
 
             var found = Matcher.FindBar(screen, this._lib,
@@ -611,17 +657,7 @@ namespace Loupedeck.EverQuestPlugin
                     found.X - 1, found.X + 1, yAbove - 1, yAbove + 1,
                     found.Scale - 1, found.Scale + 1, found.Stride - 0.5f, found.Stride + 0.5f);
             }
-
-            // 4. Now that the gems are located, check we are reading the icon pack the
-            //    game actually draws; if not, switch and re-match against the winner.
-            if (this.ChooseBestPack(screen, found))
-            {
-                found = Matcher.FindBar(screen, this._lib,
-                    found.X - 0.5f, found.X + 0.5f, found.Y0 - 0.5f, found.Y0 + 0.5f,
-                    found.Scale - 0.5f, found.Scale + 0.5f, found.Stride - 0.25f, found.Stride + 0.25f);
-            }
-
-            return Average(found) >= GridScore ? ToGrid(found) : null;
+            return found;
         }
 
         private static Grid ToGrid(BarFit f) => new Grid { X = f.X, Y0 = f.Y0, Size = f.Scale, Stride = f.Stride };

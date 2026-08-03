@@ -200,6 +200,7 @@ namespace Loupedeck.EverQuestPlugin
         {
             public String Skin = "default";
             public Double? BarXPercent;   // CastSpellWnd/XPos, reliable
+            public String BarXRef = "left"; // CastSpellWnd/XRef: which edge XPos is measured from
             public String IniName = "";
         }
 
@@ -231,6 +232,10 @@ namespace Loupedeck.EverQuestPlugin
                     if (String.Equals(key, "UISkin", StringComparison.OrdinalIgnoreCase) && val.Length > 0)
                     {
                         s.Skin = val;
+                    }
+                    else if (section == "CastSpellWnd" && String.Equals(key, "XRef", StringComparison.OrdinalIgnoreCase))
+                    {
+                        s.BarXRef = val.ToLowerInvariant();
                     }
                     else if (section == "CastSpellWnd" && String.Equals(key, "XPos", StringComparison.OrdinalIgnoreCase))
                     {
