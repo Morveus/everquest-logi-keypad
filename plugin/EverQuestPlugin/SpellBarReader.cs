@@ -51,6 +51,14 @@ namespace Loupedeck.EverQuestPlugin
         private const Int32 UnreadableStreakBeforeRelocate = 24;
         // Above this, the geometry is considered locked and no refinement is needed.
         private const Single GoodScore = 0.95f;
+        // A spell icon is never this small on screen. Without an absolute floor the
+        // pitch sweep can "find" an 11 px grid in background texture and lock onto it.
+        private const Single MinIconPixels = 16f;
+        private const Single MinStridePixels = 22f;
+        // A real bar produces confident matches on most gems. A spurious grid on scenery
+        // averages just above the bar while no single gem is convincing, so require a
+        // majority of genuinely good matches too.
+        private const Int32 MinConfidentGems = 6;
         // Consecutive flat readings before declaring a gem slot empty. A spell being
         // scribed also reads flat for a moment, so one cycle is not enough.
         private const Int32 FlatStreakBeforeEmpty = 2;
@@ -578,7 +586,7 @@ namespace Loupedeck.EverQuestPlugin
                 var fit = Matcher.FindBar(screen, this._lib,
                     this._grid.X - 1, this._grid.X + 1, this._grid.Y0 - 1, this._grid.Y0 + 1,
                     this._grid.Size - 1, this._grid.Size + 1, this._grid.Stride - 0.25f, this._grid.Stride + 0.25f);
-                if (Average(fit) >= GridScore) { return ToGrid(fit); }
+                if (IsPlausible(fit)) { return ToGrid(fit); }
             }
 
             // 2. Locate by structure: the gems repeat at a fixed vertical stride, which
@@ -623,10 +631,10 @@ namespace Loupedeck.EverQuestPlugin
                 foreach (var pitch in PitchRanges)
                 {
                     var cand = this.LocateInBand(screen, band[0], band[1], pitch[0], pitch[1]);
-                    if (best == null || Average(cand) > Average(best)) { best = cand; }
-                    if (Average(best) >= GridScore) { break; }
+                    if (IsPlausible(cand) && (best == null || Average(cand) > Average(best))) { best = cand; }
+                    if (IsPlausible(best)) { break; }
                 }
-                if (Average(best) >= GridScore) { break; }
+                if (IsPlausible(best)) { break; }
             }
             var found = best;
 
@@ -639,7 +647,7 @@ namespace Loupedeck.EverQuestPlugin
                     found.Scale - 0.5f, found.Scale + 0.5f, found.Stride - 0.25f, found.Stride + 0.25f);
             }
 
-            return Average(found) >= GridScore ? ToGrid(found) : null;
+            return IsPlausible(found) ? ToGrid(found) : null;
         }
 
 
@@ -684,6 +692,17 @@ namespace Loupedeck.EverQuestPlugin
         }
 
         private static Grid ToGrid(BarFit f) => new Grid { X = f.X, Y0 = f.Y0, Size = f.Scale, Stride = f.Stride };
+
+        // Is this a believable spell bar, or scenery that happens to repeat?
+        private static Boolean IsPlausible(BarFit f)
+        {
+            if (f == null || f.Gems == null || f.Gems.Count == 0) { return false; }
+            if (f.Scale < MinIconPixels || f.Stride < MinStridePixels) { return false; }
+            if (Average(f) < GridScore) { return false; }
+            var confident = 0;
+            foreach (var g in f.Gems) { if (g.Score >= ChangeScore) { confident++; } }
+            return confident >= MinConfidentGems;
+        }
 
         private static Single Average(BarFit f)
         {
