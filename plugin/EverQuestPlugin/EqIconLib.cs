@@ -89,12 +89,27 @@ namespace EqIcon
         public int W, H;
         public float[] R, G, B, A;
 
-        public static FloatImg FromBitmap(Bitmap bmp)
+        // Where this buffer starts inside the source image. Converting a whole game
+        // window is millions of pixels per poll; converting just the spell bar is a few
+        // thousand. Patch() takes source coordinates and subtracts this offset, so
+        // callers keep working in window coordinates either way.
+        // NOTE: FindBar / FindGridPeriodic assume a zero offset (full-window buffer).
+        public int OffsetX, OffsetY;
+
+        public static FloatImg FromBitmap(Bitmap bmp) => FromBitmap(bmp, 0, 0, bmp.Width, bmp.Height);
+
+        // Convert only the given source rectangle (clamped to the bitmap).
+        public static FloatImg FromBitmap(Bitmap bmp, int rx, int ry, int rw, int rh)
         {
-            var f = new FloatImg { W = bmp.Width, H = bmp.Height };
+            rx = Math.Max(0, Math.Min(rx, bmp.Width - 1));
+            ry = Math.Max(0, Math.Min(ry, bmp.Height - 1));
+            rw = Math.Max(1, Math.Min(rw, bmp.Width - rx));
+            rh = Math.Max(1, Math.Min(rh, bmp.Height - ry));
+
+            var f = new FloatImg { W = rw, H = rh, OffsetX = rx, OffsetY = ry };
             int n = f.W * f.H;
             f.R = new float[n]; f.G = new float[n]; f.B = new float[n]; f.A = new float[n];
-            BitmapData bd = bmp.LockBits(new Rectangle(0, 0, f.W, f.H), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            BitmapData bd = bmp.LockBits(new Rectangle(rx, ry, f.W, f.H), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
             byte[] row = new byte[f.W * 4];
             for (int y = 0; y < f.H; y++)
             {
@@ -134,8 +149,8 @@ namespace EqIcon
             {
                 for (int ox = 0; ox < size; ox++)
                 {
-                    float fx = sx + (ox + 0.5f) * sw / size - 0.5f;
-                    float fy = sy + (oy + 0.5f) * sh / size - 0.5f;
+                    float fx = sx - OffsetX + (ox + 0.5f) * sw / size - 0.5f;
+                    float fy = sy - OffsetY + (oy + 0.5f) * sh / size - 0.5f;
                     int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
                     float ax = fx - x0, ay = fy - y0;
                     float ar = 0, ag = 0, ab = 0;

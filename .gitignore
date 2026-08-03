@@ -1,14 +1,6 @@
-# Sorties générées par l'extracteur (recréées à chaque exécution)
-icons/
-barfit.json
-debug-capture.png
-
 # Build .NET du plugin
 bin/
 obj/
-
-# Bibliothèque compilée à la volée par le script (recréée si la source change)
-tools/EqIconLib.dll
 
 # Divers
 *.bak

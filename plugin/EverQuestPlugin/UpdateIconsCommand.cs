@@ -1,10 +1,9 @@
 namespace Loupedeck.EverQuestPlugin
 {
     using System;
-    using System.Threading.Tasks;
 
-    // "Mise à jour" button: runs update-spell-icons.ps1 (captures the EQ window and
-    // rewrites icons\spell_*.png). SpellCommand's file watcher then refreshes the keys.
+    // Forces a full read: relocates the spell bar and re-identifies all nine gems.
+    // Useful after moving the bar, changing resolution or switching character.
     public class UpdateIconsCommand : PluginDynamicCommand
     {
         private Boolean _running;
@@ -21,27 +20,16 @@ namespace Loupedeck.EverQuestPlugin
             {
                 return;
             }
+            if (EverQuestPlugin.Updater == null) { return; }
             this._running = true;
             this._lastFailed = false;
             this.ActionImageChanged();
 
-            _ = Task.Run(() =>
+            EverQuestPlugin.Updater.RunAsync(full: true).ContinueWith(t =>
             {
-                try
-                {
-                    // Full run: re-searches the bar if the cached grid no longer fits.
-                    var code = IconUpdater.Run(quick: false);
-                    this._lastFailed = code != 0;
-                }
-                catch (Exception)
-                {
-                    this._lastFailed = true;
-                }
-                finally
-                {
-                    this._running = false;
-                    this.ActionImageChanged();
-                }
+                this._lastFailed = t.IsFaulted || t.Result == ReadOutcome.Unreadable;
+                this._running = false;
+                this.ActionImageChanged();
             });
         }
 
@@ -49,6 +37,7 @@ namespace Loupedeck.EverQuestPlugin
         {
             using (var builder = new BitmapBuilder(imageSize))
             {
+                builder.Clear(BitmapColor.Black);
                 if (this._running)
                 {
                     builder.DrawText("MAJ...", BitmapColor.White);

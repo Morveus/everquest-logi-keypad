@@ -9,45 +9,64 @@ namespace Loupedeck.EverQuestPlugin
         public override Boolean UsesApplicationApiOnly => true;
         public override Boolean HasNoApplication => true;
 
-        // Where update-spell-icons.ps1 lives and writes its output. Derived from this
-        // assembly's own location (…\app\plugin\EverQuestPlugin\bin\Release\bin) by walking
-        // up to the folder that actually holds the script, so the whole app folder can be
-        // moved or copied to another machine without editing anything.
-        public static readonly String AppDir = ResolveAppDir();
+        // The actions look these up; they always point at the live instance.
+        internal static SpellBarReader Reader { get; private set; }
+        internal static IconUpdater Updater { get; private set; }
 
-        private static String ResolveAppDir()
-        {
-            try
-            {
-                var dir = Path.GetDirectoryName(typeof(EverQuestPlugin).Assembly.Location);
-                for (var i = 0; i < 8 && !String.IsNullOrEmpty(dir); i++)
-                {
-                    if (File.Exists(Path.Combine(dir, "update-spell-icons.ps1")))
-                    {
-                        return dir;
-                    }
-                    dir = Path.GetDirectoryName(dir);
-                }
-            }
-            catch (Exception)
-            {
-                // Fall through to the conventional location.
-            }
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Everquest Logi", "app");
-        }
-        public static String IconsDir => Path.Combine(AppDir, "icons");
-        public static String UpdateScript => Path.Combine(AppDir, "update-spell-icons.ps1");
+        private SpellBarReader _reader;
+        private IconUpdater _updater;
 
         public override void Load()
         {
-            this.Log.Info($"Icons dir: '{IconsDir}' (exists: {Directory.Exists(IconsDir)})");
-            this.Log.Info($"Update script: '{UpdateScript}' (exists: {File.Exists(UpdateScript)})");
-            IconUpdater.SetAutoUpdate(this, enabled: true);
+            var dataDir = this.ResolveDataDirectory();
+            this._reader = new SpellBarReader(this, dataDir);
+            this._updater = new IconUpdater(this, this._reader);
+            Reader = this._reader;
+            Updater = this._updater;
+            this.Log.Info($"Data directory: {dataDir}");
+
+            // Rebuild last session's key images first (so the keys are never blank), then
+            // read the game once so the display is current before the first timer tick.
+            var updater = this._updater;
+            var reader = this._reader;
+            _ = System.Threading.Tasks.Task.Run(() =>
+            {
+                reader.RestoreImages();
+                return updater.RunAsync(full: false);
+            });
+            this._updater.SetAutoUpdate(true);
         }
 
         public override void Unload()
         {
-            IconUpdater.Shutdown();
+            this._updater?.Dispose();
+            // Only clear the statics if a newer instance has not already taken over.
+            if (ReferenceEquals(Updater, this._updater)) { Updater = null; }
+            if (ReferenceEquals(Reader, this._reader)) { Reader = null; }
+        }
+
+        // Everything the plugin writes (calibration, debug icons) lives here. The SDK
+        // gives each plugin its own folder; fall back to LocalAppData if unavailable.
+        private String ResolveDataDirectory()
+        {
+            try
+            {
+                var dir = this.GetPluginDataDirectory();
+                if (!String.IsNullOrEmpty(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                    return dir;
+                }
+            }
+            catch (Exception)
+            {
+                // Fall through.
+            }
+            var fallback = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "EverQuestSpellPlugin");
+            Directory.CreateDirectory(fallback);
+            return fallback;
         }
     }
 }

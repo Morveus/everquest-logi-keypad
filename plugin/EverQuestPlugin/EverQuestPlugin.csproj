@@ -21,8 +21,25 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Both assemblies ship with Logi Plugin Service, so they are guaranteed present at
+         runtime and must NOT be copied next to the plugin (a duplicate PluginApi makes the
+         service refuse to load it). Referencing them from the service folder also keeps the
+         versions in lockstep with the host. -->
     <Reference Include="PluginApi">
       <HintPath>$(PluginApiDir)PluginApi.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Drawing.Common">
+      <HintPath>$(PluginApiDir)System.Drawing.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- System.Drawing.Common on .NET 10 surfaces types from these two. -->
+    <Reference Include="System.Private.Windows.Core">
+      <HintPath>$(PluginApiDir)System.Private.Windows.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Private.Windows.GdiPlus">
+      <HintPath>$(PluginApiDir)System.Private.Windows.GdiPlus.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

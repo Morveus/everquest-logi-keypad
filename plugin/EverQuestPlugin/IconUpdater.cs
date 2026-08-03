@@ -1,128 +1,95 @@
 namespace Loupedeck.EverQuestPlugin
 {
     using System;
-    using System.Diagnostics;
     using System.Threading;
+    using System.Threading.Tasks;
 
-    // Runs update-spell-icons.ps1, either on demand (full run, from the "MAJ" key) or
-    // on a timer (quick run: cached grid only, skips silently on a bad moment).
-    internal static class IconUpdater
+    // Schedules the in-process reads. A cycle is a window capture plus nine dot
+    // products, so polling can be brisk without spawning anything.
+    //
+    // Deliberately NOT static: the service can load a new plugin instance before
+    // unloading the previous one, and shared static state meant the outgoing instance
+    // disposed the incoming one's timer (leaving the plugin silently idle while the old
+    // instance kept working). One updater per plugin instance avoids that entirely.
+    internal sealed class IconUpdater : IDisposable
     {
-        // The script's watch pass makes a cycle cheap (~0.5 s), so polling can be brisk.
-        // It rate-limits its own expensive re-recognition, so a short interval here does
-        // not translate into constant heavy work.
         public const Int32 DefaultIntervalSeconds = 5;
 
-        private static readonly Object Sync = new Object();
-        private static Boolean _running;
-        private static Timer _timer;
-        private static Plugin _plugin;
+        private readonly Object _sync = new Object();
+        private readonly Plugin _plugin;
+        private readonly SpellBarReader _reader;
+        private Timer _timer;
+        private Int32 _busy;          // 0/1, guards against overlapping cycles
+        private Boolean _disposed;
 
-        public static Boolean IsRunning => _running;
-        public static Boolean AutoUpdateEnabled { get; private set; }
+        public Boolean AutoUpdateEnabled { get; private set; }
 
-        // Raised when a run actually rewrote something, so keys can redraw.
-        public static event EventHandler IconsChanged;
-
-        public static Boolean IsGameRunning()
+        public IconUpdater(Plugin plugin, SpellBarReader reader)
         {
-            try
-            {
-                return Process.GetProcessesByName("eqgame").Length > 0;
-            }
-            catch (Exception)
-            {
-                return false;
-            }
+            this._plugin = plugin;
+            this._reader = reader;
         }
 
-        // Returns the script's exit code, or -1 if it could not be started.
-        // 0 = ran, 1 = error, 2 = nothing to do (game closed, minimized, bad moment).
-        public static Int32 Run(Boolean quick)
+        // Runs a read off the calling thread. `full` forces relocating the bar.
+        public Task<ReadOutcome> RunAsync(Boolean full)
         {
-            lock (Sync)
+            return Task.Run(() =>
             {
-                if (_running)
+                if (this._disposed) { return ReadOutcome.NotRunning; }
+                if (Interlocked.CompareExchange(ref this._busy, 1, 0) != 0)
                 {
-                    return -1;
+                    return ReadOutcome.NoChange;   // a cycle is already in flight
                 }
-                _running = true;
-            }
-
-            try
-            {
-                var args = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{EverQuestPlugin.UpdateScript}\"";
-                if (quick)
+                try
                 {
-                    args += " -Quick";
-                }
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = args,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WorkingDirectory = EverQuestPlugin.AppDir
-                };
-                using (var p = Process.Start(psi))
-                {
-                    if (!p.WaitForExit(120000))
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var r = this._reader.Update(full);
+                    sw.Stop();
+                    if (full || r == ReadOutcome.Updated || sw.ElapsedMilliseconds > 1000)
                     {
-                        try { p.Kill(); } catch (Exception) { }
-                        return 1;
+                        this._plugin?.Log.Info($"read full={full} -> {r} ({this._reader.LastStatus}) in {sw.ElapsedMilliseconds} ms");
                     }
-                    return p.ExitCode;
+                    return r;
                 }
-            }
-            catch (Exception ex)
+                catch (Exception ex)
+                {
+                    this._plugin?.Log.Error($"Read failed: {ex.GetType().Name}: {ex.Message}");
+                    return ReadOutcome.Unreadable;
+                }
+                finally
+                {
+                    Volatile.Write(ref this._busy, 0);
+                }
+            });
+        }
+
+        public void SetAutoUpdate(Boolean enabled, Int32 intervalSeconds = DefaultIntervalSeconds)
+        {
+            lock (this._sync)
             {
-                _plugin?.Log.Warning($"Icon update failed to start: {ex.Message}");
-                return -1;
-            }
-            finally
-            {
-                _running = false;
+                if (this._disposed) { return; }
+                this.AutoUpdateEnabled = enabled;
+                this._timer?.Dispose();
+                this._timer = null;
+                if (!enabled)
+                {
+                    this._plugin?.Log.Info("Auto-update disabled");
+                    return;
+                }
+                var period = TimeSpan.FromSeconds(intervalSeconds);
+                this._timer = new Timer(_ => { _ = this.RunAsync(false); }, null, period, period);
+                this._plugin?.Log.Info($"Auto-update enabled ({intervalSeconds} s)");
             }
         }
 
-        public static void SetAutoUpdate(Plugin plugin, Boolean enabled, Int32 intervalSeconds = DefaultIntervalSeconds)
+        public void Dispose()
         {
-            _plugin = plugin;
-            AutoUpdateEnabled = enabled;
-
-            _timer?.Dispose();
-            _timer = null;
-
-            if (!enabled)
+            lock (this._sync)
             {
-                plugin?.Log.Info("Auto-update disabled");
-                return;
+                this._disposed = true;
+                this._timer?.Dispose();
+                this._timer = null;
             }
-
-            var period = TimeSpan.FromSeconds(intervalSeconds);
-            _timer = new Timer(_ => Tick(), null, period, period);
-            plugin?.Log.Info($"Auto-update enabled ({intervalSeconds} s)");
-        }
-
-        private static void Tick()
-        {
-            // Cheap guard: no game, nothing to read - do not even spawn PowerShell.
-            if (_running || !IsGameRunning())
-            {
-                return;
-            }
-
-            var code = Run(quick: true);
-            if (code == 0)
-            {
-                IconsChanged?.Invoke(null, EventArgs.Empty);
-            }
-        }
-
-        public static void Shutdown()
-        {
-            _timer?.Dispose();
-            _timer = null;
         }
     }
 }

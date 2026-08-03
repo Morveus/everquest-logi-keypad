@@ -1,172 +1,108 @@
-# EverQuest → Logi MX Creative Keypad : extracteur d'icônes de sorts
+# EverQuest → Logi MX Creative Keypad
 
-Extrait automatiquement les icônes des 9 premières gemmes de sorts de la fenêtre
-EverQuest ("EverQuest Legends") et les sauvegarde en PNG pleine qualité, prêtes à
-être affichées sur les 9 touches du MX Creative Keypad.
+Plugin Logitech qui affiche sur les 9 touches du MX Creative Keypad les icônes des
+9 premières gemmes de sorts d'EverQuest, lues **en direct dans la fenêtre du jeu**, et
+qui envoie le raccourci de lancement du sort correspondant.
 
-## Utilisation
+Tout est dans un seul DLL : capture de la fenêtre, localisation de la barre,
+reconnaissance des icônes, affichage et frappe clavier. Aucun script, aucun processus
+externe, rien à installer à côté.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\update-spell-icons.ps1
+## Installation
+
+Prérequis : Logi Options+ (avec Logi Plugin Service) et le SDK .NET 10
+(`winget install Microsoft.DotNet.SDK.10`) pour compiler.
+
+```bash
+dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release
 ```
 
-En pratique on ne lance jamais ce script à la main : le plugin l'appelle tout seul
-toutes les 30 s en mode `-Quick`, et la touche « Mettre à jour les icônes » déclenche
-un run complet. Le run complet reste le seul à pouvoir relocaliser la barre si tu l'as
-déplacée.
+Le plugin est alors chargé à chaud. Il reste à affecter les actions aux touches :
+voir le [README du plugin](plugin/README.md).
 
-### Mode `-Quick` (utilisé par le rafraîchissement automatique)
+## Ce que fait le plugin
 
-Un cycle de veille doit être discret et ne jamais dégrader ce qui est affiché :
+| Action | Rôle |
+|---|---|
+| **Sort 1 … Sort 9** | Affiche l'icône du sort et envoie ALT + la touche du chiffre |
+| **Mettre à jour les icônes** | Force une relecture complète (après avoir déplacé la barre) |
+| **Mise à jour auto** | Active/coupe le rafraîchissement de fond (actif par défaut, 5 s) |
 
-- il n'utilise que la grille en cache — pas de relocalisation ;
-- si le jeu est fermé, minimisé, ou si la lecture est douteuse, il sort avec le
-  code 2 sans rien toucher ;
-- il n'écrit un PNG que si les octets diffèrent réellement, pour ne pas réveiller
-  le plugin inutilement.
+Les icônes se mettent à jour toutes les 5 secondes sans rien faire. Changer un sort
+mémorisé se voit sur la touche au cycle suivant.
 
-Codes de sortie : `0` = exécuté, `1` = erreur, `2` = rien à faire (le plugin
-l'interprète comme « cycle silencieux » et ne signale rien).
+## Comment il reconnaît les icônes
 
-### La passe de veille : « est-ce toujours la même icône ? »
+Pas d'apprentissage automatique : le problème est *fermé*, on possède déjà toutes les
+réponses possibles — ce sont les fichiers d'icônes du jeu. La question n'est donc pas
+« qu'est-ce que cette image ? » mais « laquelle de ces 2 262 images connues est-ce ? ».
 
-Reconnaître une gemme, c'est demander *« laquelle des 2 262 icônes est-ce ? »*. En
-veille, la vraie question est bien moins chère : *« est-ce encore celle d'avant ? »*.
-Le script compare donc chaque gemme au PNG déjà sauvegardé — **9 comparaisons au lieu
-de 9 × 2 262** — et s'arrête là si tout concorde.
+1. **Découverte du jeu** : dossier trouvé via le processus `eqgame` en cours, sinon le
+   registre, sinon les emplacements habituels. Aucun chemin en dur.
+2. **Réglages du personnage** : le fichier `UI_<perso>_<serveur>.ini` donne le skin
+   actif et la position horizontale de la barre.
+3. **Capture** de la fenêtre par `PrintWindow` (`PW_RENDERFULLCONTENT`) : passive,
+   fonctionne avec DirectX, sans focus et sans toucher au jeu.
+4. **Choix du pack d'icônes** : le jeu contient trois jeux distincts
+   (`Textures\Alternate 1..3` ; les dossiers `uifiles` en sont des copies). Chacun est
+   noté sur la capture, le meilleur est retenu.
+5. **Reconnaissance** : chaque icône, de référence comme capturée, est rééchantillonnée
+   en 24×24 RVB (1 728 valeurs), puis centrée et normalisée. Le score est leur produit
+   scalaire, c'est-à-dire la **corrélation croisée normalisée**. Cette normalisation rend
+   la comparaison insensible à l'assombrissement de l'interface : on compare la structure
+   de l'image, pas ses valeurs absolues. Bon match : 0,96 à 0,99. Mauvais : 0,2 à 0,6.
+6. **Localisation de la barre** : par **périodicité**. Les gemmes forment une suite de
+   cellules identiques espacées d'un pas fixe ; comparer chaque ligne à celle située un
+   pas plus bas repère la barre sur toute la hauteur en ~8 ms. Le plugin remonte ensuite
+   tant qu'une gemme valide existe au-dessus, sinon toutes les icônes seraient décalées.
 
-Coûts mesurés (processus séparé, comme le lance le plugin) :
+## Coût et réactivité
 
-| | Temps écoulé | Temps processeur |
-|---|---|---|
-| Passe de veille (rien n'a changé) | 0,52 s | 0,42 s |
-| Reconnaissance complète | 2,60 s | 2,40 s |
+| | Mesuré |
+|---|---|
+| Cycle de veille (rien n'a changé) | **0,107 s**, soit 2,1 % d'un cœur à 5 s d'intervalle |
+| Localisation complète de la barre | ~55 s (rare : au premier lancement, ou si la barre bouge) |
 
-Deux garde-fous rendent une boucle à 5 s viable :
+Le cycle de veille ne repose pas la question complète : il compare chaque gemme au
+descripteur de l'icône **déjà affichée**, soit 9 produits scalaires. Ce n'est qu'en cas
+d'écart que la gemme concernée est ré-identifiée contre la bibliothèque — quelques
+millisecondes de plus, uniquement pour les gemmes concernées.
 
-- **Une gemme illisible ne compte pas.** Un emplacement vide ou un sort en cours de
-  mémorisation donne une zone uniforme, sans information : elle est ignorée au lieu
-  d'être lue comme « tout a changé ». Si aucune gemme n'est lisible, le cycle passe.
-- **Les reconnaissances complètes sont bridées** (`FullCooldown`, 25 s par défaut).
-  Une gemme en cours de recast fait chuter son score exactement comme le ferait un
-  changement de sort ; sans ce frein, un combat animé relancerait la reconnaissance
-  complète à chaque cycle. En pratique : en situation calme la boucle ne coûte que des
-  passes de veille, et même en combat elle reste bornée.
+Deux garde-fous :
 
-La bibliothèque C# est aussi compilée une seule fois vers `tools\EqIconLib.dll` et
-rechargée ensuite (0,02 s au lieu de 0,26 s), le DLL étant reconstruit dès que la
-source change.
+- **Une gemme en rechargement ne change pas l'affichage.** Son score chute exactement
+  comme le ferait un vrai changement de sort, mais elle ne ressemble alors franchement à
+  aucune icône : le seuil de remplacement (0,90) n'est pas atteint, l'icône reste en place.
+- **Une gemme illisible est ignorée** (emplacement vide, sort en cours de mémorisation) :
+  une zone uniforme ne porte aucune information et ne doit pas être lue comme un changement.
 
-Prérequis : le jeu tourne, fenêtre non minimisée (pas besoin qu'elle ait le focus).
-Aucune interaction avec le jeu : capture passive (`PrintWindow`) + lecture des
-fichiers du jeu uniquement.
+## Données écrites
 
-## Sorties (dossier `icons\`)
+Le plugin n'écrit que dans son propre dossier
+(`%LOCALAPPDATA%\Logi\LogiPluginService\PluginData\EverQuest`) :
 
 | Fichier | Contenu |
 |---|---|
-| `spell_1.png` … `spell_9.png` | Icône native 40×40 extraite des planches du jeu |
-| `spell_1@128.png` … | Version 128×128 (agrandissement net, pixel-art) |
-| `contact.png` | Planche de contrôle : gemme capturée vs icône sauvée (runs complets seulement) |
-| `manifest.json` | Par gemme : planche source, index, score de confiance |
-| `state.json` | Mémoire du choix par gemme, base de la règle « collante » ci-dessous |
-| `watch.json` | Horodatage de la dernière reconnaissance complète (bridage de la veille) |
+| `barstate.txt` | Grille de la barre, pack d'icônes, icône retenue par gemme |
+| `icons\spell_1..9.png` | Les icônes affichées, pour inspection |
 
-Le premier réflexe de diagnostic est d'ouvrir `contact.png` : la colonne de gauche est
-ce qui a été capturé à l'écran, celle de droite l'icône retenue. Si les deux colonnes
-correspondent ligne par ligne, la chaîne est correcte.
-
-## Comment ça marche
-
-1. **Découverte du jeu** : dossier d'installation trouvé via le processus `eqgame` en
-   cours, sinon le registre (entrées de désinstallation), sinon les emplacements
-   habituels sur tous les disques. Aucun chemin en dur.
-2. **Lecture des réglages** : le fichier `UI_<perso>_<serveur>.ini` du personnage donne
-   le skin actif (`UISkin`) et la position horizontale de la barre (`CastSpellWnd/XPos`).
-3. **Capture** de la fenêtre via `PrintWindow` (`PW_RENDERFULLCONTENT`, fonctionne avec DirectX).
-4. **Localisation de la barre**, en trois niveaux du moins cher au plus cher :
-   - grille en cache (`barfit.json`) revalidée à chaque run — ~2 s ;
-   - sinon, balayage large avec les **9 icônes déjà connues** comme gabarits (300× moins
-     cher que la bibliothèque entière) ;
-   - sinon, **détection de périodicité** : les gemmes forment une suite de cellules
-     identiques espacées d'un pas fixe. Comparer chaque ligne à celle située un pas plus
-     bas localise la barre sur toute la hauteur de la fenêtre en ~8 ms. Le script remonte
-     ensuite tant qu'une gemme valide se trouve au-dessus, pour être sûr de partir de la
-     première (sinon toutes les icônes seraient décalées).
-5. **Choix du pack d'icônes** : le jeu contient trois jeux distincts
-   (`Textures\Alternate 1..3` ; les dossiers `uifiles\<skin>` en sont des copies).
-   Le script les note tous sur la capture et retient le meilleur — ici Alternate 1
-   (classique, fond parchemin) à 0,98 contre 0,62 et 0,75.
-6. **Reconnaissance** : corrélation croisée normalisée (NCC), insensible à
-   l'assombrissement de l'UI, contre les ~2 260 icônes du pack retenu.
-7. **Extraction** : l'icône **source propre** (40×40) est découpée dans la planche
-   gagnante — jamais depuis la capture d'écran (sauf fallback si score < 0,80).
-
-## Robustesse
-
-- Un run n'est accepté que si le score moyen ≥ 0,85 ; sinon jusqu'à 3 tentatives
-  espacées de 2 s (un cast ou un cooldown peut griser les gemmes au mauvais moment),
-  puis échec propre : **les icônes précédentes sont conservées** et une capture de
-  debug est sauvée (`debug-capture.png`).
-- **Choix « collant » par gemme** (`state.json`). Une gemme en cours de recast est
-  dessinée avec une surcharge de progression : son score chute et le gagnant se met
-  à osciller entre des icônes quasi identiques (marge de 0,004 observée). Le script
-  re-note donc l'icône *déjà affichée* sur la capture courante et ne change que si
-  le prétendant fait mieux de plus de `Hysteresis` (0,05) **et** dépasse
-  `ChangeScore` (0,90). Observé : sans cette règle une gemme changeait à presque
-  chaque cycle ; avec, 4 cycles d'affilée ne touchent aucun fichier.
-- Le cache de calibration n'est écrit qu'après un run réussi ; s'il devient invalide
-  (barre déplacée, résolution changée), la relocalisation complète (~25 s) se relance
-  toute seule au prochain run complet.
-
-## Portabilité
-
-Rien n'est codé en dur : ni le dossier du jeu, ni le pack d'icônes, ni la position de
-la barre, ni l'emplacement de l'application (le plugin déduit ce dernier de son propre
-DLL). Le dossier `app` peut être déplacé ou copié tel quel.
-
-**Sur une machine neuve**, il suffit de : installer Logi Options+, installer le SDK
-.NET 10 (`winget install Microsoft.DotNet.SDK.10`), copier le dossier `app` où l'on
-veut, lancer `dotnet build` sur le projet du plugin, puis réaffecter les touches dans
-Options+. Supprimer `barfit.json` n'est pas nécessaire mais ne coûte rien : il est
-régénéré en ~25 s.
-
-Dépendances à l'exécution : PowerShell 5.1 et le compilateur C# de .NET Framework
-(tous deux fournis avec Windows), plus le `PluginApi.dll` du service Logi. Le SDK
-.NET 10 ne sert qu'à la compilation.
+Supprimer ce dossier ne casse rien : tout est recalculé.
 
 ## Approches écartées (et pourquoi)
 
-À lire avant de « simplifier » quoi que ce soit : chacune de ces pistes a été essayée
-et a échoué pour une raison mesurée.
+À lire avant de « simplifier » quoi que ce soit — chacune a été essayée et mesurée.
 
-- **Découper les icônes directement dans la capture d'écran.** L'UI d'EverQuest est
-  semi-transparente, donc les icônes sont assombries, et l'état du moment (recast,
-  surlignage, infobulle) pollue l'image. D'où le principe : la capture sert seulement
-  à *identifier* l'icône, jamais à la produire.
-- **Chercher la barre en balayant la bibliothèque d'icônes sur toute la hauteur.**
-  Coût mesuré : **267 s** par tentative, et surtout résultat *faux* — le balayage s'est
-  verrouillé six gemmes plus bas, ce qui décale toutes les icônes. Remplacé par la
-  détection de périodicité (8 ms) suivie d'une remontée jusqu'à la première gemme.
-- **Se fier à `CastSpellWnd/YPos` de l'INI pour la position verticale.** `XPos` décode
-  correctement (erreur ~5 px, la bordure), mais `YPos` donne 171 px d'écart quelle que
-  soit l'interprétation testée. Ne pas y retourner.
-- **Charger tous les packs d'icônes ensemble.** Les noms de fichiers sont identiques
-  d'un pack à l'autre alors que le contenu diffère : dédupliquer par nom écarte
-  silencieusement le bon pack. On note chaque pack sur la capture et on garde le
-  meilleur.
-- **Écrire les PNG à chaque cycle.** Réveille le watcher du plugin et fait clignoter
-  les touches pour rien. On compare les octets avant d'écrire.
-
-## Fichiers
-
-- `update-spell-icons.ps1` — le script principal, appelé par le plugin
-- `tools\EqIconLib.cs` — décodeur TGA, matcher NCC, détection de périodicité
-  (compilé à la volée via `Add-Type`)
-- `barfit.json` — cache : grille de la barre + pack d'icônes retenu (supprimable)
-- `icons\state.json` — mémoire du choix par gemme (supprimable)
-
-## Plugin Logi
-
-Le plugin C# est dans [plugin/](plugin) — voir son [README](plugin/README.md) pour la
-compilation, l'affectation des touches et les pièges du SDK Logi.
+- **Découper les icônes dans la capture d'écran.** L'interface est semi-transparente et
+  l'état du moment (recharge, surlignage, infobulle) pollue l'image. La capture sert à
+  *identifier* l'icône, jamais à la produire.
+- **Chercher la barre en balayant la bibliothèque sur toute la hauteur.** 267 s par
+  tentative, et résultat *faux* : verrouillage six gemmes plus bas, toutes les icônes
+  décalées. Remplacé par la périodicité (8 ms) suivie d'une remontée.
+- **Se fier à `CastSpellWnd/YPos` pour la position verticale.** `XPos` décode bien
+  (~5 px d'erreur), `YPos` donne 171 px d'écart quelle que soit l'interprétation.
+- **Dédupliquer les packs d'icônes par nom de fichier.** Les noms sont identiques d'un
+  pack à l'autre alors que le contenu diffère : on compare le contenu.
+- **Un script PowerShell appelé par le plugin** (l'architecture initiale). Coûtait
+  0,42 s de processeur par cycle rien qu'en démarrage de processus et compilation, et
+  obligeait à brider les relectures — ce qui retardait les vrais changements jusqu'à
+  17 s. Tout porter en C# dans le plugin a réglé les deux à la fois.

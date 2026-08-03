@@ -13,7 +13,7 @@ namespace Loupedeck.EverQuestPlugin
 
         protected override void RunCommand(String actionParameter)
         {
-            IconUpdater.SetAutoUpdate(this.Plugin, !IconUpdater.AutoUpdateEnabled);
+            EverQuestPlugin.Updater?.SetAutoUpdate(EverQuestPlugin.Updater.AutoUpdateEnabled == false);
             this.ActionImageChanged();
         }
 
@@ -22,7 +22,7 @@ namespace Loupedeck.EverQuestPlugin
             using (var builder = new BitmapBuilder(imageSize))
             {
                 builder.Clear(BitmapColor.Black);
-                if (IconUpdater.AutoUpdateEnabled)
+                if (EverQuestPlugin.Updater?.AutoUpdateEnabled == true)
                 {
                     builder.DrawText("AUTO\nON", new BitmapColor(120, 220, 120));
                 }
