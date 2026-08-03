@@ -17,6 +17,12 @@ namespace Loupedeck.EverQuestPlugin
         // How often the cached images are pushed to the keys again, independently of any
         // scanning. Cheap: nine image hand-overs, no capture and no matching.
         public const Int32 RepaintIntervalSeconds = 15;
+        // While EverQuest is not running there is nothing to read and nothing can change,
+        // so the plugin drops to this slower heartbeat and stops re-asserting images.
+        public const Int32 IdleIntervalSeconds = 30;
+        // Consecutive idle cycles before the icon library (~17 MB) is released. It costs
+        // ~130 ms to reload, so this only pays off once the game has been gone a while.
+        private const Int32 IdleCyclesBeforeRelease = 10;
 
         private readonly Object _sync = new Object();
         private readonly Plugin _plugin;
@@ -25,6 +31,9 @@ namespace Loupedeck.EverQuestPlugin
         private Timer _repaintTimer;
         private Int32 _busy;          // 0/1, guards against overlapping cycles
         private Boolean _disposed;
+        private Boolean _idle;        // last read found no game
+        private Int32 _idleCycles;
+        private Int32 _intervalSeconds = DefaultIntervalSeconds;
 
         public Boolean AutoUpdateEnabled { get; private set; }
 
@@ -53,6 +62,7 @@ namespace Loupedeck.EverQuestPlugin
                     var sw = System.Diagnostics.Stopwatch.StartNew();
                     var r = this._reader.Update(full);
                     sw.Stop();
+                    this.ApplyIdlePolicy(r);
                     if (full || r == ReadOutcome.Updated || sw.ElapsedMilliseconds > 1000)
                     {
                         this._plugin?.Log.Info($"read full={full} -> {r} ({this._reader.LastStatus}) in {sw.ElapsedMilliseconds} ms");
@@ -69,6 +79,44 @@ namespace Loupedeck.EverQuestPlugin
                     Volatile.Write(ref this._busy, 0);
                 }
             });
+        }
+
+        // Slow down and stop repainting while the game is absent; speed back up as soon
+        // as it returns. Also frees the icon library after a long absence.
+        private void ApplyIdlePolicy(ReadOutcome outcome)
+        {
+            var idle = outcome == ReadOutcome.NotRunning;
+            if (idle)
+            {
+                this._idleCycles++;
+                if (this._idleCycles == IdleCyclesBeforeRelease)
+                {
+                    this._reader.ReleaseLibrary();
+                    this._plugin?.Log.Info("EverQuest gone; icon library released");
+                }
+            }
+            else
+            {
+                this._idleCycles = 0;
+            }
+            if (idle == this._idle) { return; }
+
+            this._idle = idle;
+            lock (this._sync)
+            {
+                if (this._disposed || !this.AutoUpdateEnabled) { return; }
+                this._intervalSeconds = idle ? IdleIntervalSeconds : DefaultIntervalSeconds;
+                var period = TimeSpan.FromSeconds(this._intervalSeconds);
+                this._timer?.Change(period, period);
+                // Nothing can change on screen while the game is gone: no point pushing
+                // the same images to the keys over and over.
+                this._repaintTimer?.Change(
+                    idle ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(RepaintIntervalSeconds),
+                    idle ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(RepaintIntervalSeconds));
+                this._plugin?.Log.Info(idle
+                    ? $"EverQuest not running: polling every {IdleIntervalSeconds} s, repaint paused"
+                    : $"EverQuest back: polling every {DefaultIntervalSeconds} s");
+            }
         }
 
         public void SetAutoUpdate(Boolean enabled, Int32 intervalSeconds = DefaultIntervalSeconds)

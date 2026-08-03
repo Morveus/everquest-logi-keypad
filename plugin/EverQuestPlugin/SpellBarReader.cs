@@ -133,6 +133,12 @@ namespace Loupedeck.EverQuestPlugin
             catch (Exception) { return null; }
         }
 
+        // Drop the in-memory icon library (~17 MB). It is rebuilt on demand in ~130 ms.
+        public void ReleaseLibrary()
+        {
+            lock (this._sync) { this._lib = null; }
+        }
+
         public Boolean IsGemEmpty(Int32 gem)
         {
             if (gem < 1 || gem > GemCount) { return false; }
@@ -229,8 +235,19 @@ namespace Loupedeck.EverQuestPlugin
                         var suspicious = new List<Int32>();
                         for (var i = 0; i < GemCount; i++)
                         {
-                            if (!Single.IsNaN(scores[i]) && scores[i] < WatchScore) { suspicious.Add(i); }
-                            else if (this._gems[i].Norm24 == null && !this._gems[i].KnownEmpty) { suspicious.Add(i); }
+                            var st = this._gems[i];
+                            if (st.Norm24 != null)
+                            {
+                                if (!Single.IsNaN(scores[i]) && scores[i] < WatchScore) { suspicious.Add(i); }
+                                continue;
+                            }
+                            // No descriptor: either never identified, or a slot we blanked.
+                            // Either way the only question is whether something is there
+                            // now. Skipping blanked gems here made "empty" a one-way trip -
+                            // re-memorising a spell could never light the key again.
+                            var probe = strip.Patch(this._grid.X, this._grid.Y0 + i * this._grid.Stride,
+                                this._grid.Size, this._grid.Size, 24);
+                            if (Matcher.Normalize(probe)) { suspicious.Add(i); }
                         }
                         if (suspicious.Count == 0 && emptied > 0)
                         {
