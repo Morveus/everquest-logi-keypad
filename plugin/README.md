@@ -93,6 +93,17 @@ dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release -p:PluginA
 - **Write numbers with `InvariantCulture`.** `$"{x}"` yields "22,25" on a French machine,
   which the invariant parser then rejects — the calibration was lost on every restart and
   the plugin re-ran a 55-second bar location every cycle.
+- **The service quarantines a plugin it saw crash.** If Logi Plugin Service is killed
+  while a plugin is mid-work, it records that as a crash and refuses to load the plugin
+  ever again, showing a warning symbol on every key. Nothing in the plugin log explains
+  it beyond one line: `Plugin 'EverQuest' is disabled as it had crashed before`. The
+  quarantine is a single file - delete it and reload:
+
+  ```
+  %LOCALAPPDATA%\Logi\LogiPluginService\Logs\plugin_crashes\EverQuestPlugin.dll
+  ```
+
+  Worth knowing before force-killing the service to make it rescan plugins.
 - **Diagnosing a silent service failure**: the Logi binaries are obfuscated (strings
   replaced by `by.(id)`). They can be read by loading `LoupedeckService.dll` through
   reflection and calling its string decryptor.
