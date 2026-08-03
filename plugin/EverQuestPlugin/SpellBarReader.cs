@@ -66,9 +66,12 @@ namespace Loupedeck.EverQuestPlugin
         // The climb walks up one gem at a time and each step is a full sweep. Landing
         // more than a few gems below the top is already unlikely.
         private const Int32 MaxClimbSteps = 4;
-        // Consecutive flat readings before declaring a gem slot empty. A spell being
-        // scribed also reads flat for a moment, so one cycle is not enough.
-        private const Int32 FlatStreakBeforeEmpty = 2;
+        // Consecutive flat readings before declaring a gem slot empty. Deliberately
+        // long: a cast flash or a recast overlay can wash a gem out for a moment, and
+        // two cycles (ten seconds) was short enough that keys visibly blinked off and
+        // back on during a fight. Un-memorising a spell is rare and never urgent, so
+        // waiting a minute to be sure costs nothing.
+        private const Int32 FlatStreakBeforeEmpty = 12;
 
         private sealed class Grid
         {
@@ -452,13 +455,13 @@ namespace Loupedeck.EverQuestPlugin
                     continue;
                 }
 
-                LibIcon best = null;
+                LibIcon best = null, second = null;
                 Single bestScore = -1, secondScore = -1;
                 foreach (var li in this._lib)
                 {
                     var s = Matcher.Dot(p, li.Norm24);
-                    if (s > bestScore) { secondScore = bestScore; bestScore = s; best = li; }
-                    else if (s > secondScore) { secondScore = s; }
+                    if (s > bestScore) { secondScore = bestScore; second = best; bestScore = s; best = li; }
+                    else if (s > secondScore) { secondScore = s; second = li; }
                 }
                 if (best == null) { continue; }
 
@@ -480,7 +483,15 @@ namespace Loupedeck.EverQuestPlugin
                 // Only swap on a confident, clearly better match. A gem mid-recast never
                 // reaches this bar, so its icon stays put.
                 if (bestScore < ChangeScore || bestScore < incumbent + Hysteresis) { continue; }
-                if (bestScore - secondScore < MinMargin) { continue; }
+                // A thin margin only means ambiguity when the two candidates are
+                // different pictures. EverQuest ships near-identical art for several
+                // spells (all the healing hearts, for instance), so demanding a margin
+                // there rejected a perfectly good match forever - the key stayed blank.
+                if (bestScore - secondScore < MinMargin && second != null &&
+                    Matcher.Dot(best.Norm24, second.Norm24) < 0.99f)
+                {
+                    continue;
+                }
 
                 if (this.ApplyIcon(i, best, bestScore)) { changed++; }
             }
