@@ -59,6 +59,13 @@ namespace Loupedeck.EverQuestPlugin
         // averages just above the bar while no single gem is convincing, so require a
         // majority of genuinely good matches too.
         private const Int32 MinConfidentGems = 6;
+        // Hard ceiling on a whole locate. Sweeping several bands x several pitch ranges,
+        // each with its own climb, multiplies the cost: without this the search ran for
+        // over ten minutes pegging a core instead of failing and backing off.
+        private const Int32 LocateBudgetSeconds = 100;
+        // The climb walks up one gem at a time and each step is a full sweep. Landing
+        // more than a few gems below the top is already unlikely.
+        private const Int32 MaxClimbSteps = 4;
         // Consecutive flat readings before declaring a gem slot empty. A spell being
         // scribed also reads flat for a moment, so one cycle is not enough.
         private const Int32 FlatStreakBeforeEmpty = 2;
@@ -626,15 +633,21 @@ namespace Loupedeck.EverQuestPlugin
             // lets the periodicity lock onto a harmonic of the true pitch - that is how
             // the bar once got read four gems too low, shifting every icon silently.
             BarFit best = null;
+            var deadline = DateTime.UtcNow.AddSeconds(LocateBudgetSeconds);
             foreach (var band in bands)
             {
                 foreach (var pitch in PitchRanges)
                 {
+                    if (DateTime.UtcNow > deadline)
+                    {
+                        this._plugin?.Log.Info("Locate budget exhausted; giving up for now");
+                        break;
+                    }
                     var cand = this.LocateInBand(screen, band[0], band[1], pitch[0], pitch[1]);
                     if (IsPlausible(cand) && (best == null || Average(cand) > Average(best))) { best = cand; }
                     if (IsPlausible(best)) { break; }
                 }
-                if (IsPlausible(best)) { break; }
+                if (IsPlausible(best) || DateTime.UtcNow > deadline) { break; }
             }
             var found = best;
 
@@ -679,7 +692,7 @@ namespace Loupedeck.EverQuestPlugin
                 xLo, xHi + 20, py - ps / 2 - 4, py + ps / 2 + 4, szLo, szHi, ps - 1, ps + 1);
 
             // 3. Climb one gem at a time while the cell above still reads as an icon.
-            for (var up = 0; up < 13; up++)
+            for (var up = 0; up < MaxClimbSteps; up++)
             {
                 var yAbove = found.Y0 - found.Stride;
                 if (yAbove < 0) { break; }
