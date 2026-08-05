@@ -633,7 +633,16 @@ namespace EqSpells.Core
                 var fit = Matcher.FindBar(screen, this._lib,
                     this._grid.X - 1, this._grid.X + 1, this._grid.Y0 - 1, this._grid.Y0 + 1,
                     this._grid.Size - 1, this._grid.Size + 1, this._grid.Stride - 0.25f, this._grid.Stride + 0.25f, run);
-                if (IsPlausible(fit)) { return ToGrid(fit); }
+                if (IsPlausible(fit))
+                {
+                    // Recount here too. Every full read takes this fast path while the
+                    // bar has not moved, so counting only on the band sweep left the
+                    // Refresh key unable to pick up slots a stale save undercounted -
+                    // the one job it was added for.
+                    var g = ToGrid(fit);
+                    this._gemCount = this.CountGems(screen, g, fit);
+                    return g;
+                }
             }
 
             // 2. Locate by structure: the gems repeat at a fixed vertical stride, which
