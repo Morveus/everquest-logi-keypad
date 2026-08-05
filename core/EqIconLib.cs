@@ -396,9 +396,13 @@ namespace EqIcon
         }
 
         // Find the icon grid of the spell bar: search icon x, first icon y, icon size, vertical stride.
+        // nGems is the length of the run to fit. It is a parameter and not a constant
+        // because the bar itself varies: a character without the alternate-advancement
+        // unlocks shows fewer gems, and scoring cells that fall below the bar on open
+        // world would drag the average down and lose a perfectly good bar.
         public static BarFit FindBar(FloatImg screen, List<LibIcon> lib,
             float xMin, float xMax, float yMin, float yMax,
-            float szMin, float szMax, float strMin, float strMax)
+            float szMin, float szMax, float strMin, float strMax, int nGems)
         {
             // Phase 0: locate x, y and icon size with the first 3 gems (stride error is
             // negligible over 3 gems, so mid stride is safe). Catches the right basin.
@@ -412,7 +416,7 @@ namespace EqIcon
                         if (sc > b0) { b0 = sc; bx = x; by = y; bsz = sz; }
                     }
 
-            // Phase 1: around that solution, scan the stride precisely on all 9 gems.
+            // Phase 1: around that solution, scan the stride precisely on the whole run.
             float bst = mSt, best = -1e9f;
             float px = bx, py = by, psz = bsz;
             for (float st = strMin; st <= strMax + 1e-4f; st += 0.25f)
@@ -420,7 +424,7 @@ namespace EqIcon
                     for (float x = px - 2; x <= px + 2.01f; x += 1f)
                         for (float y = py - 2; y <= py + 2.01f; y += 1f)
                         {
-                            float sc = ComboScore(screen, lib, x, y, sz, st, 9, 8);
+                            float sc = ComboScore(screen, lib, x, y, sz, st, nGems, 8);
                             if (sc > best) { best = sc; bx = x; by = y; bsz = sz; bst = st; }
                         }
 
@@ -432,13 +436,13 @@ namespace EqIcon
                     for (float x = bx - 0.5f; x <= bx + 0.51f; x += 0.25f)
                         for (float y = by - 0.5f; y <= by + 0.51f; y += 0.25f)
                         {
-                            float sc = ComboScore(screen, lib, x, y, sz, st, 9, 8);
+                            float sc = ComboScore(screen, lib, x, y, sz, st, nGems, 8);
                             if (sc > b2) { b2 = sc; rx = x; ry = y; rsz = sz; rst = st; }
                         }
 
             // Phase 3: final per-gem match with margins.
             var fit = new BarFit { X = rx, Y0 = ry, Scale = rsz, Stride = rst, TotalScore = b2 };
-            for (int g = 0; g < 9; g++)
+            for (int g = 0; g < nGems; g++)
             {
                 float iy = ry + g * rst;
                 float[] p = screen.Patch(rx, iy, rsz, rsz, 24);

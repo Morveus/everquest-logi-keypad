@@ -22,7 +22,17 @@ namespace EqSpells.Core
     // so a polling cycle costs a window capture plus nine dot products.
     internal sealed class SpellBarReader
     {
-        public const Int32 GemCount = 9;
+        // EverQuest shows a variable number of spell gems: eight for most of a career,
+        // then more as levels and AA unlock them, up to fourteen. Hosts expose all
+        // fourteen keys and let the player assign whichever they use; slots the
+        // character does not have read as empty.
+        public const Int32 MaxGemCount = 14;
+        // The bar is LOCATED on a fixed run of nine gems, and this is deliberately not
+        // MaxGemCount. FindBar averages its score over the whole run, so counting cells
+        // that fall below the bar on open world would sink the average under GridScore
+        // and the bar would never be found at all. Nine is the run this recogniser was
+        // tuned and proven on; anything past it is detected afterwards, per cell.
+        private const Int32 LocateGems = 9;
 
         // A gem must still resemble its current icon by at least this much to be
         // considered unchanged. Below it, that gem is re-identified.
@@ -55,10 +65,6 @@ namespace EqSpells.Core
         // pitch sweep can "find" an 11 px grid in background texture and lock onto it.
         private const Single MinIconPixels = 16f;
         private const Single MinStridePixels = 22f;
-        // A real bar produces confident matches on most gems. A spurious grid on scenery
-        // averages just above the bar while no single gem is convincing, so require a
-        // majority of genuinely good matches too.
-        private const Int32 MinConfidentGems = 6;
         // Hard ceiling on a whole locate. Sweeping several bands x several pitch ranges,
         // each with its own climb, multiplies the cost: without this the search ran for
         // over ten minutes pegging a core instead of failing and backing off.
@@ -92,7 +98,10 @@ namespace EqSpells.Core
         private readonly IPluginLog _log;
         private readonly Object _sync = new Object();
         private readonly Object _pngLock = new Object();   // guards GemState.Png only
-        private readonly GemState[] _gems = new GemState[GemCount];
+        private readonly GemState[] _gems = new GemState[MaxGemCount];
+        // How many gems this character actually shows. Established by the last full
+        // locate and persisted, so a restart does not go back to assuming nine.
+        private Int32 _gemCount = LocateGems;
 
         private List<LibIcon> _lib;
         private String _gameDir;
@@ -124,7 +133,7 @@ namespace EqSpells.Core
         {
             this._log = log;
             this.DataDir = dataDir;
-            for (var i = 0; i < GemCount; i++)
+            for (var i = 0; i < MaxGemCount; i++)
             {
                 this._gems[i] = new GemState();
             }
@@ -141,7 +150,7 @@ namespace EqSpells.Core
         // rendering must never queue behind that.
         public Byte[] GetIconPng(Int32 gem)
         {
-            if (gem < 1 || gem > GemCount) { return null; }
+            if (gem < 1 || gem > MaxGemCount) { return null; }
             lock (this._pngLock)
             {
                 return this._gems[gem - 1].Png;
@@ -154,9 +163,17 @@ namespace EqSpells.Core
             lock (this._sync) { this._lib = null; }
         }
 
+        // How many gems this character's bar actually has. Hosts expose all MaxGemCount
+        // keys regardless - the player assigns whichever ones they use - but this says
+        // which of them can ever show something.
+        public Int32 GemCount => this._gemCount;
+
         public Boolean IsGemEmpty(Int32 gem)
         {
-            if (gem < 1 || gem > GemCount) { return false; }
+            if (gem < 1 || gem > MaxGemCount) { return false; }
+            // Past the end of the bar there is nothing to read, which is a blank key for
+            // the same reason an unmemorised slot is - not a gem we failed to identify.
+            if (gem > this._gemCount) { return true; }
             return this._gems[gem - 1].KnownEmpty;
         }
 
@@ -197,7 +214,7 @@ namespace EqSpells.Core
                             (Int32)(this._grid.X - margin),
                             (Int32)(this._grid.Y0 - margin),
                             (Int32)(this._grid.Size + 2 * margin),
-                            (Int32)((GemCount - 1) * this._grid.Stride + this._grid.Size + 2 * margin));
+                            (Int32)((this._gemCount - 1) * this._grid.Stride + this._grid.Size + 2 * margin));
 
                         // The stored grid is only as precise as the last full locate, and
                         // sub-pixel drift alone drops every score enough to look like a
@@ -214,7 +231,7 @@ namespace EqSpells.Core
                         // Treating that as "unchanged" would freeze stale icons forever.
                         var readable = 0;
                         var known = 0;
-                        for (var i = 0; i < GemCount; i++)
+                        for (var i = 0; i < this._gemCount; i++)
                         {
                             if (!Single.IsNaN(scores[i])) { readable++; }
                             if (this._gems[i].Norm24 != null) { known++; }
@@ -228,7 +245,7 @@ namespace EqSpells.Core
                         // A gem reading flat while others read fine is an empty slot, not
                         // a broken capture: clear its key instead of leaving a stale spell.
                         var emptied = 0;
-                        for (var i = 0; i < GemCount; i++)
+                        for (var i = 0; i < this._gemCount; i++)
                         {
                             var st = this._gems[i];
                             var flat = Single.IsNaN(scores[i]) && st.Norm24 != null;
@@ -248,7 +265,7 @@ namespace EqSpells.Core
                         }
 
                         var suspicious = new List<Int32>();
-                        for (var i = 0; i < GemCount; i++)
+                        for (var i = 0; i < this._gemCount; i++)
                         {
                             var st = this._gems[i];
                             if (st.Norm24 != null)
@@ -329,8 +346,17 @@ namespace EqSpells.Core
                     this._grid = grid;
                     this._anchorGrid = new Grid { X = grid.X, Y0 = grid.Y0, Size = grid.Size, Stride = grid.Stride };
 
+                    // The bar may have got shorter since the last locate - a different
+                    // character on the same account, or a UI layout change. Slots that no
+                    // longer exist must go blank rather than keep the previous character's
+                    // art on a key that now casts nothing.
+                    for (var i = this._gemCount; i < MaxGemCount; i++)
+                    {
+                        if (this._gems[i].Sheet != null) { this.ClearGem(i); }
+                    }
+
                     var all = new List<Int32>();
-                    for (var i = 0; i < GemCount; i++) { all.Add(i); }
+                    for (var i = 0; i < this._gemCount; i++) { all.Add(i); }
                     var changed = this.ReidentifyGems(screen, all);
                     this.SaveState();
                     this.LastStatus = changed > 0 ? $"{changed} icon(s) updated" : "unchanged";
@@ -351,8 +377,8 @@ namespace EqSpells.Core
         // a gem we have never identified. It must not be read as "this gem changed".
         private Single[] GemScores(FloatImg img, Grid g)
         {
-            var outp = new Single[GemCount];
-            for (var i = 0; i < GemCount; i++)
+            var outp = new Single[this._gemCount];
+            for (var i = 0; i < this._gemCount; i++)
             {
                 var st = this._gems[i];
                 if (st.Norm24 == null) { outp[i] = Single.NaN; continue; }
@@ -595,13 +621,14 @@ namespace EqSpells.Core
 
         private Grid LocateBar(FloatImg screen)
         {
-            // 1. Revalidate the grid we already know.
+            // 1. Revalidate the grid we already know, on the run length we last agreed on.
             if (this._grid != null)
             {
+                var run = Math.Min(this._gemCount, LocateGems);
                 var fit = Matcher.FindBar(screen, this._lib,
                     this._grid.X - 1, this._grid.X + 1, this._grid.Y0 - 1, this._grid.Y0 + 1,
-                    this._grid.Size - 1, this._grid.Size + 1, this._grid.Stride - 0.25f, this._grid.Stride + 0.25f);
-                if (IsPlausible(fit)) { return ToGrid(fit); }
+                    this._grid.Size - 1, this._grid.Size + 1, this._grid.Stride - 0.25f, this._grid.Stride + 0.25f, run);
+                if (IsPlausible(fit, run)) { return ToGrid(fit); }
             }
 
             // 2. Locate by structure: the gems repeat at a fixed vertical stride, which
@@ -641,21 +668,35 @@ namespace EqSpells.Core
             // lets the periodicity lock onto a harmonic of the true pitch - that is how
             // the bar once got read four gems too low, shifting every icon silently.
             BarFit best = null;
+            var bestRun = LocateGems;
             var deadline = DateTime.UtcNow.AddSeconds(LocateBudgetSeconds);
-            foreach (var band in bands)
+            foreach (var run in LocateRuns)
             {
-                foreach (var pitch in PitchRanges)
+                foreach (var band in bands)
                 {
-                    if (DateTime.UtcNow > deadline)
+                    foreach (var pitch in PitchRanges)
                     {
-                        this._log?.Info("Locate budget exhausted; giving up for now");
-                        break;
+                        if (DateTime.UtcNow > deadline)
+                        {
+                            this._log?.Info("Locate budget exhausted; giving up for now");
+                            break;
+                        }
+                        var cand = this.LocateInBand(screen, band[0], band[1], pitch[0], pitch[1], run);
+                        if (IsPlausible(cand, run) && (best == null || Average(cand) > Average(best)))
+                        {
+                            best = cand;
+                            bestRun = run;
+                        }
+                        if (IsPlausible(best, bestRun)) { break; }
                     }
-                    var cand = this.LocateInBand(screen, band[0], band[1], pitch[0], pitch[1]);
-                    if (IsPlausible(cand) && (best == null || Average(cand) > Average(best))) { best = cand; }
-                    if (IsPlausible(best)) { break; }
+                    if (IsPlausible(best, bestRun) || DateTime.UtcNow > deadline) { break; }
                 }
-                if (IsPlausible(best) || DateTime.UtcNow > deadline) { break; }
+                // A long run is a far stronger signal than a short one: nine cells that all
+                // match icons is hard for scenery to fake, five is not. So the runs are
+                // tried longest first and the search stops at the first one that convinces.
+                // The shorter runs exist only for characters who have not unlocked the
+                // later gems, and are reached only when the alternative is finding nothing.
+                if (IsPlausible(best, bestRun) || DateTime.UtcNow > deadline) { break; }
             }
             var found = best;
 
@@ -665,10 +706,38 @@ namespace EqSpells.Core
             {
                 found = Matcher.FindBar(screen, this._lib,
                     found.X - 0.5f, found.X + 0.5f, found.Y0 - 0.5f, found.Y0 + 0.5f,
-                    found.Scale - 0.5f, found.Scale + 0.5f, found.Stride - 0.25f, found.Stride + 0.25f);
+                    found.Scale - 0.5f, found.Scale + 0.5f, found.Stride - 0.25f, found.Stride + 0.25f, bestRun);
             }
 
-            return IsPlausible(found) ? ToGrid(found) : null;
+            if (!IsPlausible(found, bestRun)) { return null; }
+            var grid = ToGrid(found);
+            this._gemCount = this.CountGems(screen, grid, bestRun);
+            return grid;
+        }
+
+        // Run lengths to fit, longest first. See the comment at the call site for why the
+        // order matters and why the short runs are a last resort.
+        private static readonly Int32[] LocateRuns = { LocateGems, 8, 7, 6, 5 };
+
+        // How many gems this bar actually has. The fit only proves the first `run` cells;
+        // walk down from there and keep every cell that still reads as an icon.
+        //
+        // ChangeScore is the same bar a gem must clear to change the art on a key, so a
+        // cell that clears it is at least as convincing as an ordinary recognition. Open
+        // world does not clear it: best-match-over-2262-icons hovers around 0.8 on plain
+        // background, which is exactly why that threshold exists in the first place.
+        private Int32 CountGems(FloatImg screen, Grid g, Int32 run)
+        {
+            var n = run;
+            for (var i = run; i < MaxGemCount; i++)
+            {
+                var y = g.Y0 + i * g.Stride;
+                if (y + g.Size > screen.H) { break; }
+                if (Matcher.ScoreCell(screen, this._lib, g.X, y, g.Size) < ChangeScore) { break; }
+                n = i + 1;
+            }
+            if (n != run) { this._log?.Info($"Spell bar has {n} gem(s) (fitted on {run})"); }
+            return n;
         }
 
 
@@ -685,9 +754,9 @@ namespace EqSpells.Core
             new[] { 60f, 85f },   // heavily scaled up
         };
 
-        private BarFit LocateInBand(FloatImg screen, Int32 xLo, Int32 xHi, Single pitchLo, Single pitchHi)
+        private BarFit LocateInBand(FloatImg screen, Int32 xLo, Int32 xHi, Single pitchLo, Single pitchHi, Int32 run)
         {
-            var per = Matcher.FindGridPeriodic(screen, xLo, xHi + 45, pitchLo, pitchHi, 0.5f, GemCount);
+            var per = Matcher.FindGridPeriodic(screen, xLo, xHi + 45, pitchLo, pitchHi, 0.5f, run);
             var py = per[0];
             var ps = per[1];
             // The icon does not fill its cell the same way in every skin: the classic
@@ -697,7 +766,7 @@ namespace EqSpells.Core
             var szHi = (Int32)(ps * 0.98f);
 
             var found = Matcher.FindBar(screen, this._lib,
-                xLo, xHi + 20, py - ps / 2 - 4, py + ps / 2 + 4, szLo, szHi, ps - 1, ps + 1);
+                xLo, xHi + 20, py - ps / 2 - 4, py + ps / 2 + 4, szLo, szHi, ps - 1, ps + 1, run);
 
             // 3. Climb one gem at a time while the cell above still reads as an icon.
             for (var up = 0; up < MaxClimbSteps; up++)
@@ -707,7 +776,7 @@ namespace EqSpells.Core
                 if (Matcher.ScoreCell(screen, this._lib, found.X, yAbove, found.Scale) < 0.80f) { break; }
                 found = Matcher.FindBar(screen, this._lib,
                     found.X - 1, found.X + 1, yAbove - 1, yAbove + 1,
-                    found.Scale - 1, found.Scale + 1, found.Stride - 0.5f, found.Stride + 0.5f);
+                    found.Scale - 1, found.Scale + 1, found.Stride - 0.5f, found.Stride + 0.5f, run);
             }
             return found;
         }
@@ -715,15 +784,24 @@ namespace EqSpells.Core
         private static Grid ToGrid(BarFit f) => new Grid { X = f.X, Y0 = f.Y0, Size = f.Scale, Stride = f.Stride };
 
         // Is this a believable spell bar, or scenery that happens to repeat?
-        private static Boolean IsPlausible(BarFit f)
+        private static Boolean IsPlausible(BarFit f, Int32 run)
         {
             if (f == null || f.Gems == null || f.Gems.Count == 0) { return false; }
             if (f.Scale < MinIconPixels || f.Stride < MinStridePixels) { return false; }
             if (Average(f) < GridScore) { return false; }
             var confident = 0;
             foreach (var g in f.Gems) { if (g.Score >= ChangeScore) { confident++; } }
-            return confident >= MinConfidentGems;
+            return confident >= ConfidentGemsNeeded(run);
         }
+
+        // A real bar produces confident matches on most gems. A spurious grid on scenery
+        // averages just above GridScore while no single gem is convincing, so require a
+        // majority of genuinely good matches too: two thirds of the run, never fewer than
+        // four. On the nine-gem run that is the six this was tuned to, against a false
+        // grid the pitch sweep once found in background texture. A shorter run gets a
+        // proportionally smaller quota; the floor stops the weakest run from being
+        // satisfied by a couple of lucky cells.
+        private static Int32 ConfidentGemsNeeded(Int32 run) => Math.Max(4, run * 2 / 3);
 
         private static Single Average(BarFit f)
         {
@@ -814,9 +892,10 @@ namespace EqSpells.Core
                         this._grid.Stride.ToString("R", inv),
                     }));
                 }
+                lines.Add("gems=" + this._gemCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 if (this._iconDir != null) { lines.Add("iconDir=" + this._iconDir); }
                 if (this._gameDir != null) { lines.Add("gameDir=" + this._gameDir); }
-                for (var i = 0; i < GemCount; i++)
+                for (var i = 0; i < MaxGemCount; i++)
                 {
                     var st = this._gems[i];
                     if (st.KnownEmpty) { lines.Add($"gem{i + 1}=empty"); }
@@ -852,11 +931,17 @@ namespace EqSpells.Core
                             this._grid = new Grid { X = x, Y0 = y, Size = s, Stride = t };
                         }
                     }
+                    else if (key == "gems")
+                    {
+                        // Absent in files written before the bar length was variable; the
+                        // field defaults to the nine-gem run those builds assumed.
+                        if (Int32.TryParse(val, out var gc) && gc >= 1 && gc <= MaxGemCount) { this._gemCount = gc; }
+                    }
                     else if (key == "iconDir") { this._iconDir = val; }
                     else if (key == "gameDir") { this._gameDir = val; }
                     else if (key.StartsWith("gem"))
                     {
-                        if (Int32.TryParse(key.Substring(3), out var n) && n >= 1 && n <= GemCount)
+                        if (Int32.TryParse(key.Substring(3), out var n) && n >= 1 && n <= MaxGemCount)
                         {
                             if (val == "empty") { this._gems[n - 1].KnownEmpty = true; continue; }
                             var cut = val.LastIndexOf('|');
@@ -884,7 +969,7 @@ namespace EqSpells.Core
                 var known = 0;
                 foreach (var st0 in this._gems) { if (st0.Sheet != null) { known++; } }
                 var restored = 0;
-                for (var i = 0; i < GemCount; i++)
+                for (var i = 0; i < MaxGemCount; i++)
                 {
                     var st = this._gems[i];
                     if (st.Sheet == null || st.Png != null) { continue; }

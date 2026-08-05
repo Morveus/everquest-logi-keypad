@@ -4,19 +4,21 @@ namespace Loupedeck.EverQuestPlugin
 
     using EqSpells.Core;
 
-    // One multi-instance command: parameters "1".."9" map to the nine spell gems.
-    // Pressing a key sends ALT + the matching digit-row key; the key displays the icon
-    // read live from the game window.
+    // One multi-instance command: parameters "1".."14" map to the spell gems. A given
+    // character shows only as many as it has unlocked; the rest stay blank. Pressing a
+    // key sends ALT + the matching digit-row key; the key displays the icon read live
+    // from the game window.
     public class SpellCommand : PluginDynamicCommand
     {
         public SpellCommand() : base()
         {
-            for (var i = 1; i <= SpellBarReader.GemCount; i++)
+            for (var i = 1; i <= SpellBarReader.MaxGemCount; i++)
             {
                 // Layout-neutral label on purpose: the keystroke is sent by physical key
                 // position, so this is ALT+& on AZERTY and ALT+1 on QWERTY. Naming the
                 // AZERTY character here would read as a bug on any other layout.
-                this.AddParameter($"{i}", $"Spell {i} (ALT+{i})", "EverQuest Spells");
+                var binding = i <= 9 ? $" (ALT+{i})" : i == 10 ? " (ALT+0)" : " (no default binding)";
+                this.AddParameter($"{i}", $"Spell {i}{binding}", "EverQuest Spells");
             }
         }
 
@@ -38,7 +40,7 @@ namespace Loupedeck.EverQuestPlugin
         // user pressed it, which is what forced a redraw.
         private void OnIconsChanged(Object sender, EventArgs e)
         {
-            for (var i = 1; i <= SpellBarReader.GemCount; i++)
+            for (var i = 1; i <= SpellBarReader.MaxGemCount; i++)
             {
                 this.ActionImageChanged(i.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
