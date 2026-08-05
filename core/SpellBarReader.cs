@@ -257,6 +257,13 @@ namespace EqSpells.Core
                             if (flat)
                             {
                                 st.FlatStreak++;
+                                // Milestones only: this branch runs every cycle for a
+                                // minute before anything visible happens, and that
+                                // silence once cost an evening of blind guessing.
+                                if (st.FlatStreak == 1 || st.FlatStreak == FlatStreakBeforeEmpty / 2)
+                                {
+                                    this._log?.Info($"Gem {i + 1} reads flat (streak {st.FlatStreak}/{FlatStreakBeforeEmpty})");
+                                }
                                 if (st.FlatStreak >= FlatStreakBeforeEmpty && !st.KnownEmpty)
                                 {
                                     this.ClearGem(i);
@@ -265,6 +272,12 @@ namespace EqSpells.Core
                             }
                             else if (!Single.IsNaN(scores[i]))
                             {
+                                // A long flat streak dying just before the threshold is
+                                // exactly the kind of oscillation worth seeing in the log.
+                                if (st.FlatStreak >= 3)
+                                {
+                                    this._log?.Info($"Gem {i + 1} flat streak reset at {st.FlatStreak} (score {scores[i]:F2})");
+                                }
                                 st.FlatStreak = 0;
                             }
                         }
@@ -321,6 +334,11 @@ namespace EqSpells.Core
                         // showing what we have and only consider relocating after a long
                         // sustained streak; the Refresh key forces it at any time.
                         this._unreadableStreak++;
+                        if (this._unreadableStreak == 1 || this._unreadableStreak == UnreadableStreakBeforeRelocate / 2)
+                        {
+                            var which = String.Join(",", suspicious.ConvertAll(x => (x + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                            this._log?.Info($"Gem(s) {which} unidentifiable (streak {this._unreadableStreak}/{UnreadableStreakBeforeRelocate})");
+                        }
                         if (this._unreadableStreak < UnreadableStreakBeforeRelocate)
                         {
                             this.LastStatus = $"gem(s) in transition ({this._unreadableStreak})";
@@ -1010,6 +1028,33 @@ namespace EqSpells.Core
                 return grid == null
                     ? $"NOT FOUND in {sw.Elapsed.TotalSeconds:F1} s"
                     : $"grid x={grid.X:F2} y0={grid.Y0:F2} size={grid.Size:F2} stride={grid.Stride:F2} slots={this._gemCount} in {sw.Elapsed.TotalSeconds:F1} s";
+            }
+        }
+
+        // Offline diagnostic sibling of LocateFromBitmap: one watch-pass cycle on a saved
+        // capture, every per-gem intermediate returned as text.
+        public String WatchFromBitmap(Bitmap bmp)
+        {
+            lock (this._sync)
+            {
+                if (!this.EnsureLibrary()) { return "library unavailable"; }
+                if (this._grid == null) { return "no saved grid"; }
+                var margin = 8;
+                var strip = FloatImg.FromBitmap(bmp,
+                    (Int32)(this._grid.X - margin),
+                    (Int32)(this._grid.Y0 - margin),
+                    (Int32)(this._grid.Size + 2 * margin),
+                    (Int32)((this._gemCount - 1) * this._grid.Stride + this._grid.Size + 2 * margin));
+                var scores = this.GemScores(strip, this._grid);
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"gemCount={this._gemCount} grid x={this._grid.X:F2} y0={this._grid.Y0:F2} size={this._grid.Size:F2} stride={this._grid.Stride:F2}");
+                for (var i = 0; i < this._gemCount; i++)
+                {
+                    var st = this._gems[i];
+                    var flat = Single.IsNaN(scores[i]) && st.Norm24 != null;
+                    sb.AppendLine($"gem {i + 1}: score={scores[i]:F3} known={(st.Norm24 != null ? 1 : 0)} empty={(st.KnownEmpty ? 1 : 0)} flat={(flat ? 1 : 0)}");
+                }
+                return sb.ToString();
             }
         }
 
