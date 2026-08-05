@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Spell Gem</title>
+  <style>
+    /* Stream Deck ships sdpi.css with the software, but relying on it means a broken
+       panel whenever they move it. This is the handful of rules the panel actually
+       needs, matching their dark chrome. */
+    body {
+      margin: 0;
+      padding: 12px;
+      background: #2d2d2d;
+      color: #d8d8d8;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      font-size: 9pt;
+    }
+    .row { display: flex; align-items: center; margin-bottom: 10px; }
+    .label { width: 96px; text-align: right; padding-right: 8px; color: #969696; }
+    select { flex: 1; background: #3d3d3d; color: #d8d8d8; border: 1px solid #3d3d3d;
+             border-radius: 3px; padding: 4px; font-size: 9pt; }
+    .note { color: #969696; line-height: 1.45; margin-top: 14px; padding-top: 10px;
+            border-top: 1px solid #3d3d3d; }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <div class="label">Spell gem</div>
+    <select id="gem"></select>
+  </div>
+  <div class="row">
+    <div class="label">Sends</div>
+    <select id="binding"></select>
+  </div>
+  <div class="note" id="note"></div>
+
+<script>
+  // Gems 1 to 10 are on EverQuest's default bindings. Gems 11 to 14 only exist with
+  // alternate-advancement unlocks and the game ships no binding for them at all, so the
+  // player has to say which one they chose in-game.
+  const AUTO_MAX = 10;
+  const BINDINGS = ["auto", "none",
+    "alt+1","alt+2","alt+3","alt+4","alt+5","alt+6","alt+7","alt+8","alt+9","alt+0",
+    "alt+f1","alt+f2","alt+f3","alt+f4","alt+f5","alt+f6",
+    "alt+f7","alt+f8","alt+f9","alt+f10","alt+f11","alt+f12"];
+
+  let websocket = null, uuid = null, actionInfo = null;
+  let settings = { gem: 1, binding: "auto" };
+
+  const gemSelect = document.getElementById("gem");
+  const bindingSelect = document.getElementById("binding");
+  const note = document.getElementById("note");
+
+  for (let i = 1; i <= 14; i++) {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = "Gem " + i + (i > AUTO_MAX ? "  (needs AA)" : "");
+    gemSelect.appendChild(o);
+  }
+  for (const b of BINDINGS) {
+    const o = document.createElement("option");
+    o.value = b;
+    o.textContent = b === "auto" ? "Automatic (ALT + number row)"
+                  : b === "none" ? "Nothing"
+                  : b.toUpperCase();
+    bindingSelect.appendChild(o);
+  }
+
+  function refreshNote() {
+    const gem = parseInt(gemSelect.value, 10);
+    const binding = bindingSelect.value;
+    if (binding === "auto" && gem > AUTO_MAX) {
+      note.textContent = "EverQuest has no default shortcut for gem " + gem +
+        ". Bind it in the game's Keys options, then pick the same shortcut here — " +
+        "otherwise this key will show the icon but cast nothing.";
+    } else if (binding === "none") {
+      note.textContent = "This key shows the spell but sends no keystroke.";
+    } else {
+      note.textContent = "The keystroke is sent by physical key position, so it works " +
+        "the same on AZERTY and QWERTY.";
+    }
+  }
+
+  function save() {
+    settings.gem = parseInt(gemSelect.value, 10);
+    settings.binding = bindingSelect.value;
+    refreshNote();
+    if (!websocket) { return; }
+    websocket.send(JSON.stringify({ event: "setSettings", context: uuid, payload: settings }));
+  }
+
+  gemSelect.addEventListener("change", save);
+  bindingSelect.addEventListener("change", save);
+
+  // Called by the Stream Deck software once the panel is loaded.
+  function connectElgatoStreamDeckSocket(port, propertyInspectorUUID, registerEvent, info, actionInfoJson) {
+    uuid = propertyInspectorUUID;
+    actionInfo = JSON.parse(actionInfoJson);
+    Object.assign(settings, actionInfo.payload.settings || {});
+    gemSelect.value = String(settings.gem || 1);
+    bindingSelect.value = settings.binding || "auto";
+    refreshNote();
+
+    websocket = new WebSocket("ws://127.0.0.1:" + port);
+    websocket.onopen = () => {
+      websocket.send(JSON.stringify({ event: registerEvent, uuid: propertyInspectorUUID }));
+      // Write the defaults back immediately: a key dropped on the deck and never opened
+      // would otherwise have no settings at all, and every one of them would be gem 1.
+      save();
+    };
+  }
+</script>
+</body>
+</html>

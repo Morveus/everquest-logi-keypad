@@ -6,7 +6,7 @@ keystrokes. No external script, no spawned process.
 
 ## Actions
 
-- **Spell 1 … Spell 9** (group *EverQuest Spells*): each key shows the icon read from the
+- **Spell 1 … Spell 14** (group *EverQuest Spells*): each key shows the icon read from the
   game and sends **ALT + the physical number-row key**. Sent by key *position*, so it is
   ALT+1…ALT+9 on QWERTY and ALT+&, ALT+é, ALT+"… on AZERTY.
 - **Refresh icons**: forces a full read, including relocating the bar. Doubles as the
@@ -60,7 +60,7 @@ to end up beside the plugin.
 | `core/IPluginLog.cs` | The one thing the core asks its host for: somewhere to log |
 | `EverQuestPlugin.cs` | `Plugin` class: data folder, reader and timer startup |
 | `IconUpdater.cs` | Schedules reads (timer, overlap guard) |
-| `SpellCommand.cs` | The nine spell keys |
+| `SpellCommand.cs` | The fourteen spell keys |
 | `UpdateIconsCommand.cs` / `AutoUpdateCommand.cs` | The two service keys |
 | `KeyboardHelper.cs` | Sends ALT + number row through the SDK keyboard API |
 | `LogiLog.cs` | Adapts `IPluginLog` onto the service's logger |

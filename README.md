@@ -1,38 +1,50 @@
-# EverQuest Spells — Logi MX Creative Console plugin
+# EverQuest Spells — spell gems on your keypad
 
 (disclaimer : this is 100% vibe coded)
 
-Your nine spell gems, live on your keypad.
+Your spell gems, live on your keys.
 
-This plugin watches the EverQuest window, recognises which spells you have memorised,
-and paints the matching icons on the first nine keys of a Logitech MX Creative Console.
-Pressing a key casts the spell. Memorise a different spell and the key follows within
-five seconds — no configuration, no re-mapping, nothing to maintain.
+This watches the EverQuest window, recognises which spells you have memorised, and paints
+the matching icons on your keypad. Pressing a key casts the spell. Memorise a different
+spell and the key follows within five seconds — no configuration, no re-mapping, nothing
+to maintain.
 
-It is a single DLL. It does not modify the game, inject anything into it, or read its
-memory: it takes a passive screenshot of the window and compares what it sees against
-the game's own icon files.
+It does not modify the game, inject anything into it, or read its memory: it takes a
+passive screenshot of the window and compares what it sees against the game's own icon
+files.
+
+Two devices are supported, sharing the same recognition code:
+
+| Device | Host |
+|---|---|
+| **Logitech MX Creative Console** (or Loupedeck CT / Live) | [`plugin/`](plugin/) |
+| **Elgato Stream Deck** (MK.2, XL, Studio, +, Neo) | [`streamdeck/`](streamdeck/) |
 
 ---
 
 ## Why
 
-Mapping nine spell icons by hand is tedious, and you have to redo it every time you
-change your spell set. This automates exactly that, and nothing else.
+Mapping spell icons by hand is tedious, and you have to redo it every time you change
+your spell set. This automates exactly that, and nothing else.
 
 ## Requirements
 
 - Windows
-- [Logi Options+](https://www.logitech.com/software/logi-options-plus.html) with Logi Plugin Service
-- A Logitech MX Creative Console (or a Loupedeck CT / Live)
 - EverQuest, windowed or borderless (not exclusive fullscreen)
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) — to build
+- For the Logitech host: [Logi Options+](https://www.logitech.com/software/logi-options-plus.html) with Logi Plugin Service
+- For the Stream Deck host: the Stream Deck software, 6.0 or later
 
 ## Install
 
 ```bash
 git clone https://github.com/Morveus/everquest-logi-keypad.git
 cd everquest-logi-keypad
+```
+
+**Logitech:**
+
+```bash
 dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release
 ```
 
@@ -46,21 +58,38 @@ dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release -p:PluginA
 > The build registers the *source folder* you built from. Keep the clone where it is, or
 > rebuild after moving it.
 
+**Stream Deck:**
+
+```bash
+dotnet build streamdeck/EverQuestStreamDeck/EverQuestStreamDeck.csproj -c Release
+```
+
+Then copy `streamdeck/com.morveus.everquest.sdPlugin` into
+`%APPDATA%\Elgato\StreamDeck\Plugins\` and restart the Stream Deck software.
+
 ## Assign the keys
 
-In Options+, select your MX Creative Console. In the actions panel on the right, click
-**ALL ACTIONS** at the top — it is filtered to *System Actions* by default and the
-plugin will not show up until you do. Then find the **EverQuest Spells** group and drag:
+**Logitech.** In Options+, select your MX Creative Console. In the actions panel on the
+right, click **ALL ACTIONS** at the top — it is filtered to *System Actions* by default
+and the plugin will not show up until you do. Then find the **EverQuest Spells** group
+and drag:
 
 | Action | What it does |
 |---|---|
-| **Spell 1 … Spell 9** | Shows the spell icon, sends ALT + the matching number-row key |
+| **Spell 1 … Spell 14** | Shows the spell icon, sends ALT + the matching number-row key |
 | **Refresh icons** | Forces a full re-read; also the status light (red = stuck) |
 | **Auto refresh** | Turns the background refresh on/off (on by default) |
 
+**Stream Deck.** Drop the single **Spell Gem** action on as many keys as you like and
+pick which gem each one shows.
+
 The keystroke is sent by *physical key position*, so it is ALT+1…ALT+9 on QWERTY and
-ALT+&, ALT+é, ALT+"… on AZERTY — whichever your EverQuest binds expect. Change your in-game
-gem binds to match, or fork and edit `KeyboardHelper.cs` if you use a different modifier.
+ALT+&, ALT+é, ALT+"… on AZERTY — whichever your EverQuest binds expect.
+
+Gem 10 is ALT+0, matching the game's own defaults. Gems 11 to 14 exist only once
+alternate advancement unlocks them, and EverQuest ships **no** default binding for those:
+bind them in the game and, on Stream Deck, pick the same shortcut in the key's settings.
+On the Logitech host those keys show the spell but send nothing.
 
 The first run has to find the spell bar from scratch, which takes about a minute. After
 that the calibration is remembered and each check costs a few tens of milliseconds.
@@ -105,7 +134,7 @@ the bar over the whole window height in about 8 ms.
 | Full bar location | ~55 s, only on first run or if you move the bar |
 
 An idle check does not re-answer the full question. It compares each gem against the
-descriptor of the icon *already shown* — nine dot products. Only a gem that no longer
+descriptor of the icon *already shown* — one dot product per gem. Only a gem that no longer
 matches is re-identified against the library.
 
 Two things it deliberately refuses to do:
@@ -120,7 +149,7 @@ Two things it deliberately refuses to do:
 
 Only in its own folder,
 `%LOCALAPPDATA%\Logi\LogiPluginService\PluginData\EverQuest`: the calibration
-(`barstate.txt`), the auto-refresh preference, and a copy of the nine icons for
+(`barstate.txt`), the auto-refresh preference, and a copy of the icons for
 inspection. Deleting that folder is safe — everything is recomputed.
 
 ## Known limits
@@ -131,11 +160,13 @@ Honest list, in rough order of how likely you are to hit them:
   Windows scaling. Other DPI settings or EverQuest UI scales will fall outside it and
   the bar will not be found. Widening the range was tried and makes it worse — it locks
   onto a harmonic and reads the bar several gems off. This needs a proper fix.
-- **Exactly nine gems, stacked vertically.** A spell window arranged horizontally or in
-  two columns is not supported.
+- **Gems stacked vertically.** A spell window arranged horizontally or in two columns is
+  not supported. The number of gems is detected (1 to 14), but the bar is *located* on a
+  run of nine, falling back to shorter runs only if that fails — a character with very
+  few gems is the least well-tested case.
 - **Custom skins.** The 40 px cell size and the gem-socket grey are assumed. A third-party
   skin with different metrics will degrade or break recognition.
-- **Nothing proves it found the *spell* bar.** A hotbar of nine spell icons at a similar
+- **Nothing proves it found the *spell* bar.** A hotbar of spell icons at a similar
   pitch would pass the same test.
 - **Exclusive fullscreen** cannot be captured. Use windowed or borderless.
 

@@ -1,0 +1,36 @@
+{
+  "SDKVersion": 2,
+  "Name": "EverQuest Spells",
+  "Version": "1.0.0.0",
+  "Author": "Morveus",
+  "Description": "Shows your EverQuest spell gems on the keys, read live from the game window, and casts them.",
+  "URL": "https://github.com/Morveus/everquest-logi-keypad",
+  "Category": "EverQuest",
+  "CategoryIcon": "images/category",
+  "Icon": "images/plugin",
+  "CodePath": "bin/EverQuestStreamDeck.exe",
+  "Software": { "MinimumVersion": "6.0" },
+  "OS": [
+    { "Platform": "windows", "MinimumVersion": "10" }
+  ],
+  "ApplicationsToMonitor": {
+    "windows": ["eqgame.exe"]
+  },
+  "Actions": [
+    {
+      "UUID": "com.morveus.everquest.spell",
+      "Name": "Spell Gem",
+      "Icon": "images/action",
+      "Tooltip": "One EverQuest spell gem: shows the memorised spell and casts it.",
+      "PropertyInspectorPath": "propertyInspector/spell.html",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "images/key",
+          "TitleAlignment": "bottom",
+          "ShowTitle": false
+        }
+      ]
+    }
+  ]
+}

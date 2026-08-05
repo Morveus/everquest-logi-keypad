@@ -30,8 +30,9 @@ namespace Loupedeck.EverQuestPlugin
         public override void Load()
         {
             var dataDir = this.ResolveDataDirectory();
-            this._reader = new SpellBarReader(new LogiLog(this), dataDir);
-            this._updater = new IconUpdater(this, this._reader);
+            var log = new LogiLog(this);
+            this._reader = new SpellBarReader(log, dataDir);
+            this._updater = new IconUpdater(log, this._reader);
             Reader = this._reader;
             Updater = this._updater;
             this._reader.IconsChanged += (_, __) => RaiseIconsRefreshed();

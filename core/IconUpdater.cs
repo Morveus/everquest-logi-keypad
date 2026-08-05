@@ -1,18 +1,16 @@
-namespace Loupedeck.EverQuestPlugin
+namespace EqSpells.Core
 {
     using System;
     using System.Threading;
     using System.Threading.Tasks;
 
-    using EqSpells.Core;
-
     // Schedules the in-process reads. A cycle is a window capture plus nine dot
     // products, so polling can be brisk without spawning anything.
     //
-    // Deliberately NOT static: the service can load a new plugin instance before
-    // unloading the previous one, and shared static state meant the outgoing instance
-    // disposed the incoming one's timer (leaving the plugin silently idle while the old
-    // instance kept working). One updater per plugin instance avoids that entirely.
+    // Deliberately NOT static: a host can load a new plugin instance before unloading
+    // the previous one, and shared static state meant the outgoing instance disposed the
+    // incoming one's timer (leaving the plugin silently idle while the old instance kept
+    // working). One updater per host instance avoids that entirely.
     internal sealed class IconUpdater : IDisposable
     {
         public const Int32 DefaultIntervalSeconds = 5;
@@ -27,7 +25,7 @@ namespace Loupedeck.EverQuestPlugin
         private const Int32 IdleCyclesBeforeRelease = 10;
 
         private readonly Object _sync = new Object();
-        private readonly Plugin _plugin;
+        private readonly IPluginLog _log;
         private readonly SpellBarReader _reader;
         private Timer _timer;
         private Timer _repaintTimer;
@@ -43,9 +41,9 @@ namespace Loupedeck.EverQuestPlugin
         // no capture, no matching. A safety net against the host dropping a repaint.
         public Action ForceRepaint { get; set; }
 
-        public IconUpdater(Plugin plugin, SpellBarReader reader)
+        public IconUpdater(IPluginLog log, SpellBarReader reader)
         {
-            this._plugin = plugin;
+            this._log = log;
             this._reader = reader;
         }
 
@@ -67,13 +65,13 @@ namespace Loupedeck.EverQuestPlugin
                     this.ApplyIdlePolicy(r);
                     if (full || r == ReadOutcome.Updated || sw.ElapsedMilliseconds > 1000)
                     {
-                        this._plugin?.Log.Info($"read full={full} -> {r} ({this._reader.LastStatus}) in {sw.ElapsedMilliseconds} ms");
+                        this._log?.Info($"read full={full} -> {r} ({this._reader.LastStatus}) in {sw.ElapsedMilliseconds} ms");
                     }
                     return r;
                 }
                 catch (Exception ex)
                 {
-                    this._plugin?.Log.Error($"Read failed: {ex.GetType().Name}: {ex.Message}");
+                    this._log?.Error($"Read failed: {ex.GetType().Name}: {ex.Message}");
                     return ReadOutcome.Unreadable;
                 }
                 finally
@@ -94,7 +92,7 @@ namespace Loupedeck.EverQuestPlugin
                 if (this._idleCycles == IdleCyclesBeforeRelease)
                 {
                     this._reader.ReleaseLibrary();
-                    this._plugin?.Log.Info("EverQuest gone; icon library released");
+                    this._log?.Info("EverQuest gone; icon library released");
                 }
             }
             else
@@ -115,7 +113,7 @@ namespace Loupedeck.EverQuestPlugin
                 this._repaintTimer?.Change(
                     idle ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(RepaintIntervalSeconds),
                     idle ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(RepaintIntervalSeconds));
-                this._plugin?.Log.Info(idle
+                this._log?.Info(idle
                     ? $"EverQuest not running: polling every {IdleIntervalSeconds} s, repaint paused"
                     : $"EverQuest back: polling every {DefaultIntervalSeconds} s");
             }
@@ -133,7 +131,7 @@ namespace Loupedeck.EverQuestPlugin
                 this._repaintTimer = null;
                 if (!enabled)
                 {
-                    this._plugin?.Log.Info("Auto-update disabled");
+                    this._log?.Info("Auto-update disabled");
                     return;
                 }
                 var period = TimeSpan.FromSeconds(intervalSeconds);
@@ -147,7 +145,7 @@ namespace Loupedeck.EverQuestPlugin
                     _ => { try { this.ForceRepaint?.Invoke(); } catch (Exception) { } },
                     null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(RepaintIntervalSeconds));
 
-                this._plugin?.Log.Info($"Auto-update enabled ({intervalSeconds} s, repaint every {RepaintIntervalSeconds} s)");
+                this._log?.Info($"Auto-update enabled ({intervalSeconds} s, repaint every {RepaintIntervalSeconds} s)");
             }
         }
 

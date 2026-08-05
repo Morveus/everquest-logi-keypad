@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- WinExe, not Exe: the Stream Deck software launches this itself and a console
+         window flashing up on every start would be pure noise. Diagnostics go to the
+         plugin's own log file instead. -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>EverQuestStreamDeck</AssemblyName>
+    <RootNamespace>EverQuestStreamDeck</RootNamespace>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- The capture and matching code is Windows-only by construction: PrintWindow, GDI+
+         and the registry. Declaring it keeps the compatibility analyser quiet about what
+         is a deliberate design constraint, so a real warning stays visible. -->
+    <SupportedOSPlatformVersion>6.1</SupportedOSPlatformVersion>
+
+    <!-- Build straight into the .sdPlugin folder, where manifest.json expects
+         bin/EverQuestStreamDeck.exe. Keeping the layout right at build time means the
+         only install step is copying that one folder. -->
+    <BaseOutputPath>$(MSBuildProjectDirectory)\bin\</BaseOutputPath>
+    <OutputPath>$(MSBuildProjectDirectory)\..\com.morveus.everquest.sdPlugin\bin\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+
+  <!-- The recognition core, shared verbatim with the Logitech plugin. Compiled in as
+       source: one source of truth, and nothing extra to place beside the executable. -->
+  <ItemGroup>
+    <Compile Include="..\..\core\*.cs" LinkBase="Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Unlike the Logitech host, nothing is guaranteed to be installed alongside this
+         plugin, so System.Drawing.Common comes from NuGet and ships with it. -->
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>
