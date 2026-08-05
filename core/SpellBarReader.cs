@@ -65,6 +65,11 @@ namespace EqSpells.Core
         // pitch sweep can "find" an 11 px grid in background texture and lock onto it.
         private const Single MinIconPixels = 16f;
         private const Single MinStridePixels = 22f;
+        // Cells that must individually clear ChangeScore for a located grid to be
+        // believed. See IsPlausible for the full reasoning; 4 is low enough for a
+        // character with a handful of memorised spells and a tail of empty sockets,
+        // and still four independent 0.90 matches - which scenery does not produce.
+        private const Int32 MinConfidentGems = 4;
         // Hard ceiling on a whole locate. Sweeping several bands x several pitch ranges,
         // each with its own climb, multiplies the cost: without this the search ran for
         // over ten minutes pegging a core instead of failing and backing off.
@@ -628,7 +633,7 @@ namespace EqSpells.Core
                 var fit = Matcher.FindBar(screen, this._lib,
                     this._grid.X - 1, this._grid.X + 1, this._grid.Y0 - 1, this._grid.Y0 + 1,
                     this._grid.Size - 1, this._grid.Size + 1, this._grid.Stride - 0.25f, this._grid.Stride + 0.25f, run);
-                if (IsPlausible(fit, run)) { return ToGrid(fit); }
+                if (IsPlausible(fit)) { return ToGrid(fit); }
             }
 
             // 2. Locate by structure: the gems repeat at a fixed vertical stride, which
@@ -668,37 +673,28 @@ namespace EqSpells.Core
             // lets the periodicity lock onto a harmonic of the true pitch - that is how
             // the bar once got read four gems too low, shifting every icon silently.
             BarFit best = null;
-            var bestRun = LocateGems;
             var deadline = DateTime.UtcNow.AddSeconds(LocateBudgetSeconds);
-            foreach (var run in LocateRuns)
+            foreach (var band in bands)
             {
-                foreach (var band in bands)
+                foreach (var pitch in PitchRanges)
                 {
-                    foreach (var pitch in PitchRanges)
+                    if (DateTime.UtcNow > deadline)
                     {
-                        if (DateTime.UtcNow > deadline)
-                        {
-                            this._log?.Info("Locate budget exhausted; giving up for now");
-                            break;
-                        }
-                        var cand = this.LocateInBand(screen, band[0], band[1], pitch[0], pitch[1], run);
-                        if (IsPlausible(cand, run) && (best == null || Average(cand) > Average(best)))
-                        {
-                            best = cand;
-                            bestRun = run;
-                        }
-                        if (IsPlausible(best, bestRun)) { break; }
+                        this._log?.Info("Locate budget exhausted; giving up for now");
+                        break;
                     }
-                    if (IsPlausible(best, bestRun) || DateTime.UtcNow > deadline) { break; }
+                    var cand = this.LocateInBand(screen, band[0], band[1], pitch[0], pitch[1], LocateGems);
+                    if (IsPlausible(cand) && (best == null || Average(cand) > Average(best))) { best = cand; }
+                    if (IsPlausible(best)) { break; }
                 }
-                // A long run is a far stronger signal than a short one: nine cells that all
-                // match icons is hard for scenery to fake, five is not. So the runs are
-                // tried longest first and the search stops at the first one that convinces.
-                // The shorter runs exist only for characters who have not unlocked the
-                // later gems, and are reached only when the alternative is finding nothing.
-                if (IsPlausible(best, bestRun) || DateTime.UtcNow > deadline) { break; }
+                if (IsPlausible(best) || DateTime.UtcNow > deadline) { break; }
             }
             var found = best;
+            // Nothing plausible in any band: fail cleanly. Falling through with null took
+            // ChooseBestPack down with a NullReferenceException, and an exception here
+            // skips the caller's back-off - so a hidden bar re-ran a full-budget locate
+            // every cycle instead of retrying in 2 minutes.
+            if (found == null) { return null; }
 
             // 4. Now that the gems are located, check we are reading the icon pack the
             //    game actually draws; if not, switch and re-match against the winner.
@@ -706,37 +702,43 @@ namespace EqSpells.Core
             {
                 found = Matcher.FindBar(screen, this._lib,
                     found.X - 0.5f, found.X + 0.5f, found.Y0 - 0.5f, found.Y0 + 0.5f,
-                    found.Scale - 0.5f, found.Scale + 0.5f, found.Stride - 0.25f, found.Stride + 0.25f, bestRun);
+                    found.Scale - 0.5f, found.Scale + 0.5f, found.Stride - 0.25f, found.Stride + 0.25f, LocateGems);
             }
 
-            if (!IsPlausible(found, bestRun)) { return null; }
+            if (!IsPlausible(found)) { return null; }
             var grid = ToGrid(found);
-            this._gemCount = this.CountGems(screen, grid, bestRun);
+            this._gemCount = this.CountGems(screen, grid, found);
             return grid;
         }
 
-        // Run lengths to fit, longest first. See the comment at the call site for why the
-        // order matters and why the short runs are a last resort.
-        private static readonly Int32[] LocateRuns = { LocateGems, 8, 7, 6, 5 };
-
-        // How many gems this bar actually has. The fit only proves the first `run` cells;
-        // walk down from there and keep every cell that still reads as an icon.
+        // How many slots this bar actually has. The fit only proves the first LocateGems
+        // cells; walk down from there and keep every cell that reads as part of the bar.
         //
-        // ChangeScore is the same bar a gem must clear to change the art on a key, so a
-        // cell that clears it is at least as convincing as an ordinary recognition. Open
-        // world does not clear it: best-match-over-2262-icons hovers around 0.8 on plain
-        // background, which is exactly why that threshold exists in the first place.
-        private Int32 CountGems(FloatImg screen, Grid g, Int32 run)
+        // A cell belongs to the bar if it holds an icon - it clears ChangeScore, the same
+        // bar a gem must clear to change the art on a key, which open world does not
+        // (best-match-over-2262-icons hovers near 0.8 on plain background) - or if it is
+        // an empty socket. Measured on a real frame, a socket is simply FLAT: it has no
+        // structure at 24 px, the exact same signature the watch pass already uses for an
+        // emptied slot. Whatever sits below the bar is textured - the spellbook button
+        // scored 0.54 and normalised fine, scenery likewise - so "structured but not an
+        // icon" is where the bar ends. A dark panel docked flush under the bar could
+        // still read as extra flat slots; those keys then sit empty, which is exactly
+        // what a key mapped past the end of the bar should show anyway.
+        private Int32 CountGems(FloatImg screen, Grid g, BarFit fit)
         {
-            var n = run;
-            for (var i = run; i < MaxGemCount; i++)
+            var n = LocateGems;
+            for (var i = LocateGems; i < MaxGemCount; i++)
             {
                 var y = g.Y0 + i * g.Stride;
                 if (y + g.Size > screen.H) { break; }
-                if (Matcher.ScoreCell(screen, this._lib, g.X, y, g.Size) < ChangeScore) { break; }
+                var p = screen.Patch(g.X, y, g.Size, g.Size, 24);
+                var isFlatSocket = !Matcher.Normalize(p);
+                var isIcon = !isFlatSocket &&
+                    Matcher.ScoreCell(screen, this._lib, g.X, y, g.Size) >= ChangeScore;
+                if (!isIcon && !isFlatSocket) { break; }
                 n = i + 1;
             }
-            if (n != run) { this._log?.Info($"Spell bar has {n} gem(s) (fitted on {run})"); }
+            if (n != LocateGems) { this._log?.Info($"Spell bar has {n} slot(s)"); }
             return n;
         }
 
@@ -765,8 +767,16 @@ namespace EqSpells.Core
             var szLo = (Int32)Math.Max(14, ps * 0.50f);
             var szHi = (Int32)(ps * 0.98f);
 
+            // The y window reaches TWO extra strides below the periodic phase. The phase
+            // marks where stride-periodic structure STARTS, and on self-similar ground
+            // (a grass field correlates with itself at any stride) that start can be a
+            // stride or two ABOVE the bar's first gem. The climb below only ever walks
+            // up, so a phase above the bar used to put the true y0 outside the search
+            // entirely - the bar was pixel-perfect on screen and never found. With the
+            // window covering both cases, the nine-cell optimiser decides: nine real
+            // icons always outscore a shifted run that swaps gems for ground.
             var found = Matcher.FindBar(screen, this._lib,
-                xLo, xHi + 20, py - ps / 2 - 4, py + ps / 2 + 4, szLo, szHi, ps - 1, ps + 1, run);
+                xLo, xHi + 20, py - ps / 2 - 4, py + 2 * ps + ps / 2 + 4, szLo, szHi, ps - 1, ps + 1, run);
 
             // 3. Climb one gem at a time while the cell above still reads as an icon.
             for (var up = 0; up < MaxClimbSteps; up++)
@@ -784,24 +794,42 @@ namespace EqSpells.Core
         private static Grid ToGrid(BarFit f) => new Grid { X = f.X, Y0 = f.Y0, Size = f.Scale, Stride = f.Stride };
 
         // Is this a believable spell bar, or scenery that happens to repeat?
-        private static Boolean IsPlausible(BarFit f, Int32 run)
+        //
+        // Judged on the BEST cells, not on all of them, because empty slots are part of
+        // any normal bar and score near zero against a library of spell icons. Averaging
+        // over the whole run meant a cold locate could only ever succeed on a bar that
+        // was mostly full - which is exactly how the first cold start with six memorised
+        // spells and a tail of empty sockets failed to find a perfectly visible bar.
+        //
+        // What still keeps scenery out:
+        //  - MinConfidentGems cells must each clear ChangeScore (0.90) individually.
+        //    That per-cell bar is the strong gate: open world peaks near 0.8, and the
+        //    one false grid ever observed averaged well while no single cell convinced.
+        //  - The best cells must also average GridScore, so the confident quota cannot
+        //    be carried by four lucky cells amid garbage.
+        //  - The absolute size floors, which killed the 11 px grid found in a texture.
+        // The price: a character with fewer than four identifiable spells memorised
+        // cannot be calibrated from scratch. Memorise four, calibrate once, and the
+        // watch pass tracks any number from then on.
+        private static Boolean IsPlausible(BarFit f)
         {
             if (f == null || f.Gems == null || f.Gems.Count == 0) { return false; }
             if (f.Scale < MinIconPixels || f.Stride < MinStridePixels) { return false; }
-            if (Average(f) < GridScore) { return false; }
+            var scores = new List<Single>();
             var confident = 0;
-            foreach (var g in f.Gems) { if (g.Score >= ChangeScore) { confident++; } }
-            return confident >= ConfidentGemsNeeded(run);
+            foreach (var g in f.Gems)
+            {
+                scores.Add(g.Score);
+                if (g.Score >= ChangeScore) { confident++; }
+            }
+            if (confident < MinConfidentGems) { return false; }
+            scores.Sort();
+            scores.Reverse();
+            Single sum = 0;
+            var k = Math.Min(6, scores.Count);
+            for (var i = 0; i < k; i++) { sum += scores[i]; }
+            return sum / k >= GridScore;
         }
-
-        // A real bar produces confident matches on most gems. A spurious grid on scenery
-        // averages just above GridScore while no single gem is convincing, so require a
-        // majority of genuinely good matches too: two thirds of the run, never fewer than
-        // four. On the nine-gem run that is the six this was tuned to, against a false
-        // grid the pitch sweep once found in background texture. A shorter run gets a
-        // proportionally smaller quota; the floor stops the weakest run from being
-        // satisfied by a couple of lucky cells.
-        private static Int32 ConfidentGemsNeeded(Int32 run) => Math.Max(4, run * 2 / 3);
 
         private static Single Average(BarFit f)
         {
@@ -955,6 +983,25 @@ namespace EqSpells.Core
                 }
             }
             catch (Exception) { }
+        }
+
+        // Offline diagnostic: run the real locate pipeline on a saved capture instead of
+        // the live window - same code path as Update's expensive branch. This is how a
+        // locate failure gets debugged from a screenshot instead of guessed at against
+        // a moving game.
+        public String LocateFromBitmap(Bitmap bmp)
+        {
+            lock (this._sync)
+            {
+                if (!this.EnsureLibrary()) { return "library unavailable"; }
+                var screen = FloatImg.FromBitmap(bmp);
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var grid = this.LocateBar(screen);
+                sw.Stop();
+                return grid == null
+                    ? $"NOT FOUND in {sw.Elapsed.TotalSeconds:F1} s"
+                    : $"grid x={grid.X:F2} y0={grid.Y0:F2} size={grid.Size:F2} stride={grid.Stride:F2} slots={this._gemCount} in {sw.Elapsed.TotalSeconds:F1} s";
+            }
         }
 
         // Rebuild in-memory images and descriptors for gems restored from disk.

@@ -35,12 +35,21 @@
   <div class="note" id="note"></div>
 
 <script>
-  // Gems 1 to 10 are on EverQuest's default bindings. Gems 11 to 14 only exist with
-  // alternate-advancement unlocks and the game ships no binding for them at all, so the
-  // player has to say which one they chose in-game.
-  const AUTO_MAX = 10;
+  // Gems 1 to 12 are on EverQuest's default bindings: ALT + the physical number row,
+  // all twelve keys of it (verified in the game's Keys options). Gems 13 and 14 ship
+  // with no default at all, so the player binds them in-game and picks the same key
+  // here. Names are QWERTY positions; the AZERTY hint shows what that key prints there.
+  const AUTO_MAX = 12;
+  const AZERTY = { "alt+minus": ")", "alt+equals": "=", "alt+[": "^", "alt+]": "$",
+                   "alt+;": "m", "alt+'": "ù", "alt+m": ",", "alt+q": "a",
+                   "alt+w": "z", "alt+a": "q", "alt+z": "w", "alt+,": ";", "alt+.": ":" };
   const BINDINGS = ["auto", "none",
     "alt+1","alt+2","alt+3","alt+4","alt+5","alt+6","alt+7","alt+8","alt+9","alt+0",
+    "alt+minus","alt+equals",
+    "alt+q","alt+w","alt+e","alt+r","alt+t","alt+y","alt+u","alt+i","alt+o","alt+p",
+    "alt+[","alt+]",
+    "alt+a","alt+s","alt+d","alt+f","alt+g","alt+h","alt+j","alt+k","alt+l","alt+;","alt+'",
+    "alt+z","alt+x","alt+c","alt+v","alt+b","alt+n","alt+m","alt+,","alt+.","alt+/",
     "alt+f1","alt+f2","alt+f3","alt+f4","alt+f5","alt+f6",
     "alt+f7","alt+f8","alt+f9","alt+f10","alt+f11","alt+f12"];
 
@@ -54,15 +63,20 @@
   for (let i = 1; i <= 14; i++) {
     const o = document.createElement("option");
     o.value = String(i);
-    o.textContent = "Gem " + i + (i > AUTO_MAX ? "  (needs AA)" : "");
+    o.textContent = "Gem " + i + (i > AUTO_MAX ? "  (bind it in-game first)" : "");
     gemSelect.appendChild(o);
+  }
+  function bindingLabel(b) {
+    if (b === "auto") { return "Automatic (ALT + number row)"; }
+    if (b === "none") { return "Nothing"; }
+    let label = "ALT + " + b.slice(4).replace("minus", "-").replace("equals", "=").toUpperCase();
+    if (AZERTY[b]) { label += "   (AZERTY: " + AZERTY[b].toUpperCase() + ")"; }
+    return label;
   }
   for (const b of BINDINGS) {
     const o = document.createElement("option");
     o.value = b;
-    o.textContent = b === "auto" ? "Automatic (ALT + number row)"
-                  : b === "none" ? "Nothing"
-                  : b.toUpperCase();
+    o.textContent = bindingLabel(b);
     bindingSelect.appendChild(o);
   }
 
@@ -70,14 +84,14 @@
     const gem = parseInt(gemSelect.value, 10);
     const binding = bindingSelect.value;
     if (binding === "auto" && gem > AUTO_MAX) {
-      note.textContent = "EverQuest has no default shortcut for gem " + gem +
-        ". Bind it in the game's Keys options, then pick the same shortcut here — " +
+      note.textContent = "EverQuest has no default shortcut for gems 13 and 14. " +
+        "Bind the gem in the game's Keys options, then pick the same key here — " +
         "otherwise this key will show the icon but cast nothing.";
     } else if (binding === "none") {
       note.textContent = "This key shows the spell but sends no keystroke.";
     } else {
       note.textContent = "The keystroke is sent by physical key position, so it works " +
-        "the same on AZERTY and QWERTY.";
+        "the same on AZERTY and QWERTY. Keys are named by their QWERTY position.";
     }
   }
 

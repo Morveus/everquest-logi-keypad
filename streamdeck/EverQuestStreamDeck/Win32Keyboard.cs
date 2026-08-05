@@ -25,8 +25,6 @@ namespace EverQuestStreamDeck
         private const UInt32 KeyEventScanCode = 0x0008;
         private const UInt32 KeyEventKeyUp = 0x0002;
 
-        // Set 1 scan codes for the number row, left to right: 1 2 3 4 5 6 7 8 9 0.
-        private static readonly UInt16[] NumberRow = { 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B };
         private const UInt16 ScanLeftAlt = 0x38;
 
         [StructLayout(LayoutKind.Sequential)]
@@ -73,14 +71,6 @@ namespace EverQuestStreamDeck
         // True if the struct layout is the one SendInput expects. Checked once at
         // startup so a wrong layout is a log line rather than silently dead keys.
         public static Boolean LayoutIsSane => Marshal.SizeOf<Input>() == (IntPtr.Size == 8 ? 40 : 28);
-
-        // gem is 1-based. Gems 1 to 10 sit on the number row; anything beyond has no
-        // default binding in EverQuest, so there is nothing to send.
-        public static Boolean SendAltGem(Int32 gem)
-        {
-            if (gem < 1 || gem > NumberRow.Length) { return false; }
-            return SendAltScan(NumberRow[gem - 1]);
-        }
 
         public static Boolean SendAltScan(UInt16 scan)
         {

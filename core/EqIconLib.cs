@@ -406,11 +406,14 @@ namespace EqIcon
         {
             // Phase 0: locate x, y and icon size with the first 3 gems (stride error is
             // negligible over 3 gems, so mid stride is safe). Catches the right basin.
+            // y steps by 2: the caller's y window grew to cover phase errors of up to two
+            // strides, and phase 1 re-scans y at +/-2 around the winner anyway, so the
+            // coarser step loses nothing while keeping the larger window affordable.
             float mSt = (strMin + strMax) / 2;
             float bx = xMin, by = yMin, bsz = szMin, b0 = -1e9f;
             for (float sz = szMin; sz <= szMax + 1e-4f; sz += 1f)
                 for (float x = xMin; x <= xMax + 1e-4f; x += 1f)
-                    for (float y = yMin; y <= yMax + 1e-4f; y += 1f)
+                    for (float y = yMin; y <= yMax + 1e-4f; y += 2f)
                     {
                         float sc = ComboScore(screen, lib, x, y, sz, mSt, 3, 8);
                         if (sc > b0) { b0 = sc; bx = x; by = y; bsz = sz; }
