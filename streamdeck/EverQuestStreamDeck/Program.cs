@@ -48,18 +48,42 @@ namespace EverQuestStreamDeck
                 var keys = new SpellKeys(client, reader, log);
                 using var updater = new IconUpdater(log, reader);
 
+                const String SpellAction = "com.morveus.everquest.spell";
+                const String RefreshAction = "com.morveus.everquest.refresh";
+
                 client.WillAppear += (action, context, payload) =>
                 {
+                    if (action != SpellAction) { return; }
                     keys.Remember(context, payload);
                     Forget(keys.RepaintAsync(force: true, cts.Token));
                 };
                 client.SettingsChanged += (action, context, payload) =>
                 {
+                    if (action != SpellAction) { return; }
                     keys.Remember(context, payload);
                     Forget(keys.RepaintAsync(force: true, cts.Token));
                 };
                 client.WillDisappear += (action, context, payload) => keys.Forget(context);
-                client.KeyDown += (action, context, payload) => Forget(keys.PressAsync(context, cts.Token));
+                client.KeyDown += (action, context, payload) =>
+                {
+                    if (action == RefreshAction)
+                    {
+                        // Full read: relocate the bar from scratch, then recount the
+                        // slots. This is the way out of any stale state - a moved
+                        // window, a bar that grew, a spell sitting past the last
+                        // counted slot. The key answers with the built-in check or
+                        // warning overlay when the read lands.
+                        Forget(updater.RunAsync(full: true).ContinueWith(
+                            t => (t.IsFaulted || t.Result == ReadOutcome.Unreadable || t.Result == ReadOutcome.NotRunning)
+                                ? client.ShowAlertAsync(context, cts.Token)
+                                : client.ShowOkAsync(context, cts.Token),
+                            cts.Token,
+                            TaskContinuationOptions.None,
+                            TaskScheduler.Default).Unwrap());
+                        return;
+                    }
+                    Forget(keys.PressAsync(context, cts.Token));
+                };
 
                 // Both the reader's own change notification and the updater's dumb
                 // heartbeat land on the same push; the heartbeat exists because a key

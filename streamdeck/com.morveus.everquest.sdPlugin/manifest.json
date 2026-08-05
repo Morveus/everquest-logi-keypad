@@ -31,6 +31,20 @@
           "ShowTitle": false
         }
       ]
+    },
+    {
+      "UUID": "com.morveus.everquest.refresh",
+      "Name": "Refresh Icons",
+      "Icon": "images/refresh",
+      "Tooltip": "Relocates the spell bar from scratch and recounts the slots. Use it after moving the game window or when a key looks stale.",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "images/keyrefresh",
+          "TitleAlignment": "bottom",
+          "ShowTitle": false
+        }
+      ]
     }
   ]
 }

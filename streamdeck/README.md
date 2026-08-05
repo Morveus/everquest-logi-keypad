@@ -53,12 +53,15 @@ then restarting the Stream Deck software.
 
 ## Choosing a gem
 
-Drop **Spell Gem** on a key and pick the slot in the Property Inspector.
+Drop **Spell Gem** on a key and pick the slot in the Property Inspector. Drop **Refresh
+Icons** somewhere too: it relocates the bar from scratch and recounts the slots — the way
+out of any stale state, and it answers with the built-in check/warning overlay.
 
-Gems 1 to 10 are on EverQuest's own default shortcuts (ALT + the number row) and need no
-configuration. Gems 11 to 14 only exist once alternate advancement unlocks them, and the
-game ships **no** default binding for those — bind them in the game's Keys options and
-select the same shortcut in the panel, or the key will show the spell and cast nothing.
+Gems 1 to 12 are on EverQuest's own default shortcuts (ALT + the full twelve-key number
+row) and need no configuration. Gems 13 and 14 ship with **no** default binding — bind
+them in the game's Keys options and pick the same physical key in the panel (keys are
+named by QWERTY position, with the AZERTY equivalent shown), or the key will show the
+spell and cast nothing.
 
 Keystrokes are sent by physical key position, so ALT+1 on QWERTY and ALT+& on AZERTY are
 the same key and both work without configuration.

@@ -125,6 +125,14 @@ namespace EverQuestStreamDeck
                 ["payload"] = new Dictionary<String, Object> { ["title"] = title ?? "", ["target"] = 0 },
             }, token);
 
+        // The built-in per-key feedback: a green check or a yellow warning triangle
+        // briefly overlaid on the key. Free UI for "the refresh worked / did not".
+        public Task ShowOkAsync(String context, CancellationToken token) =>
+            this.SendAsync(new Dictionary<String, Object> { ["event"] = "showOk", ["context"] = context }, token);
+
+        public Task ShowAlertAsync(String context, CancellationToken token) =>
+            this.SendAsync(new Dictionary<String, Object> { ["event"] = "showAlert", ["context"] = context }, token);
+
         public Task LogAsync(String message, CancellationToken token) =>
             this.SendAsync(new Dictionary<String, Object>
             {
