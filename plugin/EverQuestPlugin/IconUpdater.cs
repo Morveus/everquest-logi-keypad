@@ -4,6 +4,8 @@ namespace Loupedeck.EverQuestPlugin
     using System.Threading;
     using System.Threading.Tasks;
 
+    using EqSpells.Core;
+
     // Schedules the in-process reads. A cycle is a window capture plus nine dot
     // products, so polling can be brisk without spawning anything.
     //

@@ -1,4 +1,4 @@
-namespace Loupedeck.EverQuestPlugin
+namespace EqSpells.Core
 {
     using System;
     using System.Collections.Generic;

@@ -46,17 +46,29 @@ dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release -p:PluginA
 
 ## Files
 
+Recognition lives in `core/`, one level up, and knows nothing about any keypad vendor:
+it reads the screen and hands back PNG bytes. Everything under `plugin/` is the Logitech
+host. The core is compiled in as source (`<Compile Include="..\..\core\*.cs" />`) rather
+than referenced as a DLL, so there is no extra file to deploy and no way for a stale copy
+to end up beside the plugin.
+
 | File | Role |
 |---|---|
+| `core/SpellBarReader.cs` | Capture, locate, recognise, persist state, build key images |
+| `core/EqGame.cs` | Install discovery, character UI settings, icon packs, window capture |
+| `core/EqIconLib.cs` | TGA decoder, normalized cross-correlation, periodicity detection |
+| `core/IPluginLog.cs` | The one thing the core asks its host for: somewhere to log |
 | `EverQuestPlugin.cs` | `Plugin` class: data folder, reader and timer startup |
-| `SpellBarReader.cs` | The core: capture, locate, recognise, state, key images |
-| `EqGame.cs` | Install discovery, character UI settings, icon packs, window capture |
-| `EqIconLib.cs` | TGA decoder, normalized cross-correlation, periodicity detection |
 | `IconUpdater.cs` | Schedules reads (timer, overlap guard) |
 | `SpellCommand.cs` | The nine spell keys |
 | `UpdateIconsCommand.cs` / `AutoUpdateCommand.cs` | The two service keys |
 | `KeyboardHelper.cs` | Sends ALT + number row through the SDK keyboard API |
+| `LogiLog.cs` | Adapts `IPluginLog` onto the service's logger |
 | `EverQuestApplication.cs` | `ClientApplication` class required by the loader |
+
+Because the core is vendor-neutral, it also runs outside any SDK — which is how the port
+is verified: a plain console program that rebuilds the key images and compares them to
+the ones the plugin wrote.
 
 ## Logi SDK gotchas, learned the hard way
 
@@ -110,7 +122,7 @@ dotnet build plugin/EverQuestPlugin/EverQuestPlugin.csproj -c Release -p:PluginA
 
 ## Recognition tuning
 
-Constants at the top of `SpellBarReader.cs`, with what each one prevents:
+Constants at the top of `core/SpellBarReader.cs`, with what each one prevents:
 
 | Constant | Purpose |
 |---|---|

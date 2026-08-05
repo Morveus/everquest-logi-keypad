@@ -1,4 +1,4 @@
-namespace Loupedeck.EverQuestPlugin
+namespace EqSpells.Core
 {
     using System;
     using System.Collections.Generic;
@@ -89,7 +89,7 @@ namespace Loupedeck.EverQuestPlugin
             public Int32 FlatStreak;      // consecutive cycles reading as a flat patch
         }
 
-        private readonly Plugin _plugin;
+        private readonly IPluginLog _log;
         private readonly Object _sync = new Object();
         private readonly Object _pngLock = new Object();   // guards GemState.Png only
         private readonly GemState[] _gems = new GemState[GemCount];
@@ -120,9 +120,9 @@ namespace Loupedeck.EverQuestPlugin
             return outcome;
         }
 
-        public SpellBarReader(Plugin plugin, String dataDir)
+        public SpellBarReader(IPluginLog log, String dataDir)
         {
-            this._plugin = plugin;
+            this._log = log;
             this.DataDir = dataDir;
             for (var i = 0; i < GemCount; i++)
             {
@@ -131,24 +131,21 @@ namespace Loupedeck.EverQuestPlugin
             this.LoadState();
         }
 
-        // Returns a fresh BitmapImage each call; the caller owns and disposes it.
-        // Handing out a shared instance and disposing it on the next update raced with
-        // the SDK drawing the key: the draw threw and Options+ showed the action name.
+        // Returns the PNG bytes, so each host can wrap them in whatever image type its
+        // own SDK wants. Handing out a shared image object and disposing it on the next
+        // update raced with the SDK drawing the key: the draw threw and Options+ showed
+        // the action name instead of the icon. Bytes are immutable, so that cannot recur.
         //
         // Uses its own tiny lock, NOT _sync: Update() holds _sync for the whole read,
         // which can run a minute when the bar has to be located from scratch, and key
         // rendering must never queue behind that.
-        public BitmapImage GetImage(Int32 gem)
+        public Byte[] GetIconPng(Int32 gem)
         {
             if (gem < 1 || gem > GemCount) { return null; }
-            Byte[] png;
             lock (this._pngLock)
             {
-                png = this._gems[gem - 1].Png;
+                return this._gems[gem - 1].Png;
             }
-            if (png == null) { return null; }
-            try { return BitmapImage.FromArray(png); }
-            catch (Exception) { return null; }
         }
 
         // Drop the in-memory icon library (~17 MB). It is rebuilt on demand in ~130 ms.
@@ -539,7 +536,7 @@ namespace Loupedeck.EverQuestPlugin
             }
             catch (Exception ex)
             {
-                this._plugin?.Log.Warning($"Cannot build icon for gem {gemIndex + 1}: {ex.Message}");
+                this._log?.Warning($"Cannot build icon for gem {gemIndex + 1}: {ex.Message}");
                 return false;
             }
         }
@@ -651,7 +648,7 @@ namespace Loupedeck.EverQuestPlugin
                 {
                     if (DateTime.UtcNow > deadline)
                     {
-                        this._plugin?.Log.Info("Locate budget exhausted; giving up for now");
+                        this._log?.Info("Locate budget exhausted; giving up for now");
                         break;
                     }
                     var cand = this.LocateInBand(screen, band[0], band[1], pitch[0], pitch[1]);
@@ -751,7 +748,7 @@ namespace Loupedeck.EverQuestPlugin
             {
                 // The remembered folder no longer holds icons (game moved or reinstalled).
                 // Forget it so the next cycle rediscovers instead of failing forever.
-                this._plugin?.Log.Warning($"No icon pack under '{this._gameDir}' - forgetting it");
+                this._log?.Warning($"No icon pack under '{this._gameDir}' - forgetting it");
                 this._gameDir = null;
                 this._iconDir = null;
                 this._ui = null;
@@ -763,7 +760,7 @@ namespace Loupedeck.EverQuestPlugin
             var dir = (this._iconDir != null && Directory.Exists(this._iconDir)) ? this._iconDir : packs[0];
             this._lib = Matcher.LoadLibrary(dir, "Spells*.tga", 40, 107, 107, 107);
             this._iconDir = dir;
-            this._plugin?.Log.Info($"Icon pack '{Path.GetFileName(dir)}' loaded ({this._lib.Count} icons, {packs.Count} distinct pack(s))");
+            this._log?.Info($"Icon pack '{Path.GetFileName(dir)}' loaded ({this._lib.Count} icons, {packs.Count} distinct pack(s))");
             return this._lib.Count > 0;
         }
 
@@ -785,7 +782,7 @@ namespace Loupedeck.EverQuestPlugin
             }
             if (bestLib == null) { return false; }
 
-            this._plugin?.Log.Info($"Switching icon pack to '{Path.GetFileName(bestDir)}' (score {bestScore:F3})");
+            this._log?.Info($"Switching icon pack to '{Path.GetFileName(bestDir)}' (score {bestScore:F3})");
             this._iconDir = bestDir;
             this._lib = bestLib;
             // Descriptors from the old pack are meaningless now.
@@ -899,7 +896,7 @@ namespace Loupedeck.EverQuestPlugin
                 // Without this the keys keep whatever the host drew before: the first
                 // read after a reload finds everything already correct, reports
                 // NoChange, and nothing ever asks them to repaint.
-                this._plugin?.Log.Info($"RestoreImages: {known} gem(s) in saved state, {restored} rebuilt, library={this._lib?.Count ?? 0} from '{this._iconDir}'");
+                this._log?.Info($"RestoreImages: {known} gem(s) in saved state, {restored} rebuilt, library={this._lib?.Count ?? 0} from '{this._iconDir}'");
                 if (restored > 0) { this.IconsChanged?.Invoke(this, EventArgs.Empty); }
             }
         }

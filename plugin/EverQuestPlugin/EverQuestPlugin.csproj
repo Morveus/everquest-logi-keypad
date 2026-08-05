@@ -31,6 +31,13 @@
            Text="Logi Plugin Service introuvable. Installez Logi Options+, ou indiquez le dossier : dotnet build -p:PluginApiDir=&quot;D:\chemin\LogiPluginService\&quot;" />
   </Target>
 
+  <!-- The recognition core is shared verbatim with the Stream Deck host. It is compiled
+       in as source rather than referenced as a DLL: nothing extra to deploy, and no way
+       for a stale copy to end up sitting next to the plugin. -->
+  <ItemGroup>
+    <Compile Include="..\..\core\*.cs" LinkBase="Core" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Both assemblies ship with Logi Plugin Service, so they are guaranteed present at
          runtime and must NOT be copied next to the plugin (a duplicate PluginApi makes the

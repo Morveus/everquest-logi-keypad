@@ -2,6 +2,8 @@ namespace Loupedeck.EverQuestPlugin
 {
     using System;
 
+    using EqSpells.Core;
+
     // One multi-instance command: parameters "1".."9" map to the nine spell gems.
     // Pressing a key sends ALT + the matching digit-row key; the key displays the icon
     // read live from the game window.
@@ -54,12 +56,16 @@ namespace Loupedeck.EverQuestPlugin
         {
             if (Int32.TryParse(actionParameter, out var gem))
             {
-                // GetImage hands over ownership: dispose it or every repaint leaks a
-                // decoded 128x128 image until finalization.
-                using (var img = EverQuestPlugin.Reader?.GetImage(gem))
+                // The core hands over PNG bytes, never a live image: decoding here means
+                // this method owns what it disposes. Sharing one BitmapImage and disposing
+                // it on the next update used to race with the SDK drawing the key, and the
+                // failed draw showed the action name instead of the icon.
+                var png = EverQuestPlugin.Reader?.GetIconPng(gem);
+                if (png != null)
                 {
-                    if (img != null)
+                    try
                     {
+                        using (var img = BitmapImage.FromArray(png))
                         using (var builder = new BitmapBuilder(imageSize))
                         {
                             builder.Clear(BitmapColor.Black);
@@ -67,6 +73,10 @@ namespace Loupedeck.EverQuestPlugin
                             builder.DrawImage(img, 0, 0, builder.Width, builder.Height);
                             return builder.ToImage();
                         }
+                    }
+                    catch (Exception)
+                    {
+                        // Fall through to the text key rather than failing the repaint.
                     }
                 }
             }

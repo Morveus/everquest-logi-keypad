@@ -3,6 +3,8 @@ namespace Loupedeck.EverQuestPlugin
     using System;
     using System.Threading;
 
+    using EqSpells.Core;
+
     // Forces a full read: relocates the spell bar and re-identifies all nine gems.
     // Useful after moving the bar, changing resolution or switching character.
     //

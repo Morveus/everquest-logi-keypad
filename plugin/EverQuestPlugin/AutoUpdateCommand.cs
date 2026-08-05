@@ -2,6 +2,8 @@ namespace Loupedeck.EverQuestPlugin
 {
     using System;
 
+    using EqSpells.Core;
+
     // Toggles the background refresh. Auto-update is on by default; this key only
     // exists so it can be turned off (e.g. to keep the machine completely idle).
     public class AutoUpdateCommand : PluginDynamicCommand

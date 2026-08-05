@@ -3,6 +3,8 @@ namespace Loupedeck.EverQuestPlugin
     using System;
     using System.IO;
 
+    using EqSpells.Core;
+
     public class EverQuestPlugin : Plugin
     {
         // API-only plugin, not tied to a monitored application.
@@ -28,7 +30,7 @@ namespace Loupedeck.EverQuestPlugin
         public override void Load()
         {
             var dataDir = this.ResolveDataDirectory();
-            this._reader = new SpellBarReader(this, dataDir);
+            this._reader = new SpellBarReader(new LogiLog(this), dataDir);
             this._updater = new IconUpdater(this, this._reader);
             Reader = this._reader;
             Updater = this._updater;
