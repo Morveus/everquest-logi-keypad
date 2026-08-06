@@ -270,10 +270,17 @@ namespace EqSpells.Core
                                     emptied++;
                                 }
                             }
-                            else if (!Single.IsNaN(scores[i]))
+                            else if (!Single.IsNaN(scores[i]) && scores[i] >= WatchScore)
                             {
-                                // A long flat streak dying just before the threshold is
-                                // exactly the kind of oscillation worth seeing in the log.
+                                // Only an actual re-match of the displayed icon resets the
+                                // countdown. Resetting on any readable patch let an empty
+                                // socket stall the clear for half an hour: at a sliver of
+                                // grid drift the socket sometimes normalises as noise,
+                                // scores ~0.3, and that noise kept being taken as "the
+                                // spell is back". Instrumentation caught it as a streak
+                                // restarting from 1 every few minutes. A genuinely busy
+                                // gem (cast flash, cooldown tint) is structured, not flat,
+                                // so the streak does not grow through a fight either way.
                                 if (st.FlatStreak >= 3)
                                 {
                                     this._log?.Info($"Gem {i + 1} flat streak reset at {st.FlatStreak} (score {scores[i]:F2})");
