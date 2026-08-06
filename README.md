@@ -38,8 +38,8 @@ your spell set. This automates exactly that, and nothing else.
 ## Install
 
 ```bash
-git clone https://github.com/Morveus/everquest-logi-keypad.git
-cd everquest-logi-keypad
+git clone https://github.com/Morveus/everquest-spell-keys.git
+cd everquest-spell-keys
 ```
 
 **Logitech:**
@@ -86,10 +86,11 @@ pick which gem each one shows.
 The keystroke is sent by *physical key position*, so it is ALT+1…ALT+9 on QWERTY and
 ALT+&, ALT+é, ALT+"… on AZERTY — whichever your EverQuest binds expect.
 
-Gem 10 is ALT+0, matching the game's own defaults. Gems 11 to 14 exist only once
-alternate advancement unlocks them, and EverQuest ships **no** default binding for those:
-bind them in the game and, on Stream Deck, pick the same shortcut in the key's settings.
-On the Logitech host those keys show the spell but send nothing.
+Gems 1 to 12 are on EverQuest's own default shortcuts — ALT + the *full* twelve-key
+number row, the two keys past the digits included. Gems 13 and 14 ship with **no**
+default binding: bind them in the game's Keys options and, on Stream Deck, pick the same
+physical key in the key's settings. On the Logitech host, gems 11 to 14 show the spell
+but send nothing (the SDK's keyboard API stops at the digit keys).
 
 The first run has to find the spell bar from scratch, which takes about a minute. After
 that the calibration is remembered and each check costs a few tens of milliseconds.
@@ -147,10 +148,16 @@ Two things it deliberately refuses to do:
 
 ## Where it stores things
 
-Only in its own folder,
-`%LOCALAPPDATA%\Logi\LogiPluginService\PluginData\EverQuest`: the calibration
-(`barstate.txt`), the auto-refresh preference, and a copy of the icons for
-inspection. Deleting that folder is safe — everything is recomputed.
+Each host keeps its own folder — two processes must not share one calibration file:
+
+| Host | Folder |
+|---|---|
+| Logitech | `%LOCALAPPDATA%\Logi\LogiPluginService\PluginData\EverQuest` |
+| Stream Deck | `%LOCALAPPDATA%\EverQuestSpells\StreamDeck` |
+
+Inside: the calibration (`barstate.txt`), a copy of the icons for inspection, and for
+the Stream Deck host its own small log (`plugin.log`). Deleting either folder is safe —
+everything is recomputed.
 
 ## Known limits
 
@@ -161,9 +168,10 @@ Honest list, in rough order of how likely you are to hit them:
   the bar will not be found. Widening the range was tried and makes it worse — it locks
   onto a harmonic and reads the bar several gems off. This needs a proper fix.
 - **Gems stacked vertically.** A spell window arranged horizontally or in two columns is
-  not supported. The number of gems is detected (1 to 14), but the bar is *located* on a
-  run of nine, falling back to shorter runs only if that fails — a character with very
-  few gems is the least well-tested case.
+  not supported. The bar length is detected (up to 14 slots, empty sockets included),
+  but the initial calibration needs at least **four identifiable spells memorised** —
+  four cells must individually convince the matcher before a grid is believed, which is
+  what keeps it from locking onto scenery.
 - **Custom skins.** The 40 px cell size and the gem-socket grey are assumed. A third-party
   skin with different metrics will degrade or break recognition.
 - **Nothing proves it found the *spell* bar.** A hotbar of spell icons at a similar

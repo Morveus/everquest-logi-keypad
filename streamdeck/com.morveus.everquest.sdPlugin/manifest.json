@@ -4,7 +4,7 @@
   "Version": "1.0.0.0",
   "Author": "Morveus",
   "Description": "Shows your EverQuest spell gems on the keys, read live from the game window, and casts them.",
-  "URL": "https://github.com/Morveus/everquest-logi-keypad",
+  "URL": "https://github.com/Morveus/everquest-spell-keys",
   "Category": "EverQuest",
   "CategoryIcon": "images/category",
   "Icon": "images/plugin",
