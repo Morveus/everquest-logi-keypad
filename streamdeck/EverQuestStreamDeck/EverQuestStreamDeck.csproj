@@ -11,6 +11,10 @@
     <AssemblyName>EverQuestStreamDeck</AssemblyName>
     <RootNamespace>EverQuestStreamDeck</RootNamespace>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- No debug info in the shipped binary: the PDB reference embeds the absolute
+         build path - username included - straight into the DLL's CodeView entry.
+         The Logitech project learned this before the v1.0.0 release; same rule here. -->
+    <DebugType>none</DebugType>
     <!-- The capture and matching code is Windows-only by construction: PrintWindow, GDI+
          and the registry. Declaring it keeps the compatibility analyser quiet about what
          is a deliberate design constraint, so a real warning stays visible. -->
